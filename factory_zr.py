@@ -174,6 +174,7 @@ class FlujoConfig:
     p_fetch_size_assigned: Optional[Union[int, str]] = None
     p_persistent_volume_gb: Optional[Union[int, str]] = None
     p_enable_md5: Optional[Union[bool, int, str]] = None
+    depends_on_datasets: Optional[List[str]] = None
 
     def __post_init__(self):
         """Validaciones y normalización"""
@@ -186,6 +187,13 @@ class FlujoConfig:
                 raise ValueError(
                     f"Horario inválido '{self.horario}'. Use formato HH:MM o HH:MM:SS"
                 )
+
+        if self.depends_on_datasets is None:
+            self.depends_on_datasets = []
+        else:
+            self.depends_on_datasets = [
+                dataset for dataset in self.depends_on_datasets if dataset
+            ]
 
 
 # ============================================================
@@ -440,13 +448,13 @@ class RocketDAGFactory(BaseDAGFactory):
     def _build_task_group(
         self,
         flujo: FlujoConfig,
-    ) -> Tuple[Optional[TimeSensor], RocketOperator, DummyOperator]:
+    ) -> Tuple[FlujoConfig, Optional[TimeSensor], RocketOperator, DummyOperator]:
         sensor = self._create_sensor_if_needed(flujo.nombre_tabla, flujo.horario)
         ingesta = self._build_rocket_operator(flujo)
         dataset = self.build_dataset_operator(flujo.nombre_tabla)
-        return sensor, ingesta, dataset
+        return flujo, sensor, ingesta, dataset
 
-    def build_tasks(self) -> List[Tuple]:
+    def build_tasks(self) -> List[Tuple[FlujoConfig, Optional[TimeSensor], RocketOperator, DummyOperator]]:
         task_groups = []
         for flujo in self.metadata.flujos:
             task_group = self._build_task_group(flujo)
@@ -469,11 +477,25 @@ class RocketDAGFactory(BaseDAGFactory):
         for dataset in dataset_tasks:
             dataset >> fin_pipeline
 
-    def set_dependencies(self, task_groups: List[Tuple]):
+    def set_dependencies(self, task_groups: List[Tuple[FlujoConfig, Optional[TimeSensor], RocketOperator, DummyOperator]]):
         dataset_tasks = []
-        for sensor, ingesta, dataset in task_groups:
+        dataset_by_table = {
+            flujo.nombre_tabla: dataset
+            for flujo, _, _, dataset in task_groups
+        }
+        for flujo, sensor, ingesta, dataset in task_groups:
             self._set_task_chain(sensor, ingesta, dataset)
             dataset_tasks.append(dataset)
+            for dependency in flujo.depends_on_datasets:
+                upstream_dataset = dataset_by_table.get(dependency)
+                if not upstream_dataset:
+                    raise ValueError(
+                        f"Dependencia '{dependency}' no encontrada para flujo '{flujo.nombre_tabla}'."
+                    )
+                if sensor:
+                    upstream_dataset >> sensor
+                else:
+                    upstream_dataset >> ingesta
         self._create_final_task(dataset_tasks)
 
 # ============================================================
