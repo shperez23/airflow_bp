@@ -28,14 +28,6 @@ DAGS_CONFIG = [
                 "talla": "SparkResources",
                 "nombre_tabla": "ZR_BP_Can_Cash_fcm_kustom_isd",
             },
-            # Flujo dependiente: espera el dataset creado por ZR_BP_Can_Cash_fcm_kustom_isd
-            {
-                "workflow_name": "pl-ingesta-Uti-MotorTablas",
-                "id_ingesta": "CAN_KUSTOM_ISD_DEP",
-                "talla": "SparkResources",
-                "nombre_tabla": "ZR_BP_Can_Cash_fcm_kustom_isd_dep",
-                "depends_on_datasets": ["ZR_BP_Can_Cash_fcm_kustom_isd"],
-            },
         ],
         "tags": ["tribe: can", "cell: datos", "domain: cash", "type: DataZonaRaw"],
         "description": "DAG de carga de información a ZR de oracle fcm grupo tablas impuestos",
