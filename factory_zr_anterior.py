@@ -1,9 +1,10 @@
 """
-Framework POO para construcción de DAGs dinámicos de Airflow.
-Clase padre abstracta y clase hija especializada.
+Framework POO para construcción de DAGs dinámicos de Airflow en ZR.
+Clase padre abstracta y clases hijas especializadas.
 Principios: Clean Code, SOLID, DRY.
 SIN valores por defecto ni datos quemados.
-Soporte para ejecución programada y event-driven con datasets opcionales.
+VERSION 3: Soporte para cálculo de fechas basado en días hacia atrás con formato completo de timestamp.
+Usa days_back_from y days_back_to para calcular rangos de fechas dinámicamente.
 """
 
 from abc import ABC, abstractmethod
@@ -11,13 +12,12 @@ from airflow import DAG
 from airflow.models.param import Param
 from datetime import datetime, timedelta
 from airflow.operators.dummy import DummyOperator
-from airflow.operators.python import ShortCircuitOperator
 from airflow.datasets import Dataset
 from airflow.sensors.time_sensor import TimeSensor
 from providers.stratio.rocket.operators.rocket_operator import RocketOperator
 import pendulum
 import pytz
-from typing import List, Dict, Tuple, Optional, Callable, Any, Union, Iterable
+from typing import List, Dict, Tuple, Optional, Callable, Any, Union
 from dataclasses import dataclass
 import sys
 
@@ -34,7 +34,6 @@ SENSOR_MODE = "reschedule"
 TASK_PREFIX_RUN = "run_"
 TASK_PREFIX_DATASET = "dataset_"
 TASK_PREFIX_SENSOR = "sensor_"
-TASK_PREFIX_FILTER = "filter_"
 TASK_FIN_PIPELINE = "fin_pipeline"
 EXECUTION_NAME_PREFIX = "airflow_run_"
 
@@ -159,14 +158,13 @@ class OperatorConfig:
 class FlujoConfig:
     """
     Configuración de un flujo de ingesta.
-    dataset_origen es opcional para soportar ejecución event-driven.
+    Usa nombres explícitos en lugar de tuplas posicionales para evitar errores.
     """
 
     workflow_name: str
     id_ingesta: str
     talla: str
     nombre_tabla: str
-    dataset_origen: Optional[str] = None
     horario: Optional[str] = None  # Opcional: formato "HH:MM:SS" o "HH:MM"
 
     p_num_ingestas_concurrente: Optional[Union[int, str]] = None
@@ -181,9 +179,6 @@ class FlujoConfig:
         """Validaciones y normalización"""
         if self.horario is not None and not self.horario.strip():
             self.horario = None
-
-        if self.dataset_origen is not None and not self.dataset_origen.strip():
-            self.dataset_origen = None
 
         if self.horario:
             parts = self.horario.split(":")
@@ -296,7 +291,7 @@ class BaseDAGFactory(ABC):
             dag_id=self.metadata.dag_id,
             default_args=self._build_default_args(),
             description=self.metadata.description,
-            schedule_interval=self._build_schedule(),
+            schedule_interval=self.metadata.schedule,
             start_date=pendulum.datetime(
                 self.metadata.start_year,
                 self.metadata.start_month,
@@ -311,11 +306,6 @@ class BaseDAGFactory(ABC):
             on_success_callback=self._build_success_callback(),
         )
         return self.dag
-
-    @abstractmethod
-    def _build_schedule(self):
-        """Método abstracto: construir schedule"""
-        pass
 
     @abstractmethod
     def build_tasks(self) -> List:
@@ -337,28 +327,14 @@ class BaseDAGFactory(ABC):
 
 
 # ============================================================
-# CLASE HIJA: ROCKET DAG FACTORY UNIFICADO
+# CLASE HIJA: ROCKET DAG FACTORY
 # ============================================================
 
 class RocketDAGFactory(BaseDAGFactory):
     """
     Clase hija especializada para DAGs con RocketOperator.
-    Soporta ejecución programada y event-driven según dataset_origen.
+    Implementa la lógica específica para tareas de ingesta.
     """
-
-    def _build_schedule(self):
-        dataset_origenes = [flujo.dataset_origen for flujo in self.metadata.flujos]
-        if any(dataset_origenes):
-            return self._build_dataset_schedule()
-        return self.metadata.schedule
-
-    def _build_dataset_schedule(self) -> List[Dataset]:
-        dataset_paths = {
-            self.build_dataset_path(flujo.dataset_origen)
-            for flujo in self.metadata.flujos
-            if flujo.dataset_origen
-        }
-        return [Dataset(path) for path in sorted(dataset_paths)]
 
     def _build_params_lists(self, talla: str) -> List[str]:
         """Construye lista de parámetros para RocketOperator"""
@@ -461,56 +437,14 @@ class RocketDAGFactory(BaseDAGFactory):
         normalized_time = self._normalize_time(horario)
         return self._build_time_sensor(nombre_tabla, normalized_time)
 
-    @staticmethod
-    def _extract_dataset_uris(events: Iterable[Any]) -> List[str]:
-        dataset_uris: List[str] = []
-        for event in events:
-            if isinstance(event, str):
-                dataset_uris.append(event)
-                continue
-            if isinstance(event, dict):
-                uri = event.get("dataset_uri") or event.get("dataset")
-                if uri:
-                    dataset_uris.append(uri)
-                continue
-            uri = getattr(event, "dataset_uri", None)
-            if uri:
-                dataset_uris.append(uri)
-        return dataset_uris
-
-    def _should_run_for_dataset(self, dataset_uri: str, **context) -> bool:
-        triggering_events = context.get("triggering_dataset_events")
-        if not triggering_events:
-            return True
-        if isinstance(triggering_events, dict):
-            dataset_uris = triggering_events.keys()
-        else:
-            dataset_uris = self._extract_dataset_uris(triggering_events)
-        return dataset_uri in set(dataset_uris)
-
-    def _build_dataset_filter(
-        self,
-        nombre_tabla: str,
-        dataset_origen: Optional[str],
-    ) -> Optional[ShortCircuitOperator]:
-        if not dataset_origen:
-            return None
-        dataset_uri = self.build_dataset_path(dataset_origen)
-        return ShortCircuitOperator(
-            task_id=f"{TASK_PREFIX_FILTER}{nombre_tabla.lower()}",
-            python_callable=self._should_run_for_dataset,
-            op_kwargs={"dataset_uri": dataset_uri},
-        )
-
     def _build_task_group(
         self,
         flujo: FlujoConfig,
-    ) -> Tuple[Optional[ShortCircuitOperator], Optional[TimeSensor], RocketOperator, DummyOperator]:
-        dataset_filter = self._build_dataset_filter(flujo.nombre_tabla, flujo.dataset_origen)
+    ) -> Tuple[Optional[TimeSensor], RocketOperator, DummyOperator]:
         sensor = self._create_sensor_if_needed(flujo.nombre_tabla, flujo.horario)
         ingesta = self._build_rocket_operator(flujo)
         dataset = self.build_dataset_operator(flujo.nombre_tabla)
-        return dataset_filter, sensor, ingesta, dataset
+        return sensor, ingesta, dataset
 
     def build_tasks(self) -> List[Tuple]:
         task_groups = []
@@ -521,16 +455,11 @@ class RocketDAGFactory(BaseDAGFactory):
 
     def _set_task_chain(
         self,
-        dataset_filter: Optional[ShortCircuitOperator],
         sensor: Optional[TimeSensor],
         ingesta: RocketOperator,
         dataset: DummyOperator,
     ) -> None:
-        if dataset_filter and sensor:
-            dataset_filter >> sensor >> ingesta >> dataset
-        elif dataset_filter:
-            dataset_filter >> ingesta >> dataset
-        elif sensor:
+        if sensor:
             sensor >> ingesta >> dataset
         else:
             ingesta >> dataset
@@ -542,11 +471,10 @@ class RocketDAGFactory(BaseDAGFactory):
 
     def set_dependencies(self, task_groups: List[Tuple]):
         dataset_tasks = []
-        for dataset_filter, sensor, ingesta, dataset in task_groups:
-            self._set_task_chain(dataset_filter, sensor, ingesta, dataset)
+        for sensor, ingesta, dataset in task_groups:
+            self._set_task_chain(sensor, ingesta, dataset)
             dataset_tasks.append(dataset)
         self._create_final_task(dataset_tasks)
-
 
 # ============================================================
 # CONFIGURACIÓN POR DEFECTO
