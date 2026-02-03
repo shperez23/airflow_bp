@@ -159,14 +159,14 @@ class OperatorConfig:
 class FlujoConfig:
     """
     Configuración de un flujo de ingesta.
-    dataset_origen es opcional para soportar ejecución event-driven.
+    dataset_origen es opcional y soporta una o varias tablas origen.
     """
 
     workflow_name: str
     id_ingesta: str
     talla: str
     nombre_tabla: str
-    dataset_origen: Optional[str] = None
+    dataset_origen: Optional[Union[str, List[str]]] = None
     horario: Optional[str] = None  # Opcional: formato "HH:MM:SS" o "HH:MM"
 
     p_num_ingestas_concurrente: Optional[Union[int, str]] = None
@@ -182,8 +182,14 @@ class FlujoConfig:
         if self.horario is not None and not self.horario.strip():
             self.horario = None
 
-        if self.dataset_origen is not None and not self.dataset_origen.strip():
-            self.dataset_origen = None
+        if isinstance(self.dataset_origen, str):
+            if not self.dataset_origen.strip():
+                self.dataset_origen = None
+            else:
+                self.dataset_origen = [self.dataset_origen.strip()]
+        elif self.dataset_origen is not None:
+            cleaned = [item.strip() for item in self.dataset_origen if item and item.strip()]
+            self.dataset_origen = cleaned or None
 
         if self.horario:
             parts = self.horario.split(":")
@@ -352,18 +358,22 @@ class RocketDAGFactory(BaseDAGFactory):
     Soporta ejecución programada y event-driven según dataset_origen.
     """
 
+    @staticmethod
+    def _get_dataset_origenes(flujo: FlujoConfig) -> List[str]:
+        if not flujo.dataset_origen:
+            return []
+        return list(flujo.dataset_origen)
+
     def _build_schedule(self):
-        dataset_origenes = [flujo.dataset_origen for flujo in self.metadata.flujos]
-        if any(dataset_origenes):
+        if any(self._get_dataset_origenes(flujo) for flujo in self.metadata.flujos):
             return self._build_dataset_schedule()
         return self.metadata.schedule
 
     def _build_dataset_schedule(self) -> List[Dataset]:
-        dataset_paths = {
-            self.build_dataset_path(flujo.dataset_origen)
-            for flujo in self.metadata.flujos
-            if flujo.dataset_origen
-        }
+        dataset_paths = set()
+        for flujo in self.metadata.flujos:
+            for dataset_origen in self._get_dataset_origenes(flujo):
+                dataset_paths.add(self.build_dataset_path(dataset_origen))
         return [Dataset(path) for path in sorted(dataset_paths)]
 
     def _build_params_lists(self, talla: str) -> List[str]:
@@ -494,25 +504,41 @@ class RocketDAGFactory(BaseDAGFactory):
             dataset_uris = self._extract_dataset_uris(triggering_events)
         return dataset_uri in set(dataset_uris)
 
+    def _should_run_for_any_dataset(self, dataset_uris: List[str], **context) -> bool:
+        triggering_events = context.get("triggering_dataset_events")
+        if not triggering_events:
+            return True
+        if isinstance(triggering_events, dict):
+            event_uris = triggering_events.keys()
+        else:
+            event_uris = self._extract_dataset_uris(triggering_events)
+        return bool(set(dataset_uris) & set(event_uris))
+
     def _build_dataset_filter(
         self,
         nombre_tabla: str,
-        dataset_origen: Optional[str],
+        dataset_origen: Optional[List[str]],
     ) -> Optional[ShortCircuitOperator]:
         if not dataset_origen:
             return None
-        dataset_uri = self.build_dataset_path(dataset_origen)
+        dataset_uris = [
+            self.build_dataset_path(dataset_name)
+            for dataset_name in dataset_origen
+        ]
         return ShortCircuitOperator(
             task_id=f"{TASK_PREFIX_FILTER}{nombre_tabla.lower()}",
-            python_callable=self._should_run_for_dataset,
-            op_kwargs={"dataset_uri": dataset_uri},
+            python_callable=self._should_run_for_any_dataset,
+            op_kwargs={"dataset_uris": dataset_uris},
         )
 
     def _build_task_group(
         self,
         flujo: FlujoConfig,
     ) -> Tuple[Optional[ShortCircuitOperator], Optional[TimeSensor], RocketOperator, DummyOperator]:
-        dataset_filter = self._build_dataset_filter(flujo.nombre_tabla, flujo.dataset_origen)
+        dataset_filter = self._build_dataset_filter(
+            flujo.nombre_tabla,
+            self._get_dataset_origenes(flujo),
+        )
         sensor = self._create_sensor_if_needed(flujo.nombre_tabla, flujo.horario)
         ingesta = self._build_rocket_operator(flujo)
         dataset = self.build_dataset_operator(flujo.nombre_tabla)
