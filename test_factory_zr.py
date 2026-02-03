@@ -302,6 +302,26 @@ def test_flujo_config_horario_invalid_format_raises():
         )
 
 
+def test_flujo_config_dataset_origen_normalizes_and_drops_empty_values():
+    flujo = factory_zr.FlujoConfig(
+        workflow_name="wf",
+        id_ingesta="ID1",
+        talla="M",
+        nombre_tabla="TABLA",
+        dataset_origen="  ",
+    )
+    assert flujo.dataset_origen is None
+
+    flujo_list = factory_zr.FlujoConfig(
+        workflow_name="wf",
+        id_ingesta="ID1",
+        talla="M",
+        nombre_tabla="TABLA",
+        dataset_origen=["ORIGEN_A", "  ", "", "ORIGEN_B"],
+    )
+    assert flujo_list.dataset_origen == ["ORIGEN_A", "ORIGEN_B"]
+
+
 def test_dagmetadata_converts_flujos_and_validates_days_back():
     config = _base_config(
         [
@@ -514,6 +534,46 @@ def test_factory_supports_multiple_dataset_origenes():
         "/ruta/ORIGEN_A",
         "/ruta/ORIGEN_B",
     }
+
+
+def test_should_run_for_any_dataset_matches_triggering_events():
+    metadata = factory_zr.DAGMetadata(
+        **_base_config(
+            [
+                {
+                    "workflow_name": "wf",
+                    "id_ingesta": "ID1",
+                    "talla": "M",
+                    "nombre_tabla": "DESTINO",
+                }
+            ]
+        )
+    )
+    global_config = factory_zr.GlobalConfig(
+        path_utils="./dags",
+        ruta_primaria_ds="/ruta",
+        ruta_grupo="/home/grupo",
+        timezone="America/Guayaquil",
+    )
+    operator_config = factory_zr.OperatorConfig(
+        connection_id="rocket-connectors",
+        retries_status=100,
+        status_polling_frequency=30,
+        extended_audit_info=True,
+        params_lists_base=["Environment", "SparkConfigurations"],
+    )
+
+    factory = factory_zr.RocketDAGFactory(metadata, global_config, operator_config)
+    dataset_uris = ["/ruta/ORIGEN_A", "/ruta/ORIGEN_B"]
+
+    assert factory._should_run_for_any_dataset(
+        dataset_uris,
+        triggering_dataset_events=["/ruta/ORIGEN_B"],
+    )
+    assert not factory._should_run_for_any_dataset(
+        dataset_uris,
+        triggering_dataset_events=["/ruta/OTRO"],
+    )
 
 
 def test_set_dependencies_creates_fin_pipeline_downstream_of_each_dataset():
