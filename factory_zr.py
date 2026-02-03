@@ -292,11 +292,17 @@ class BaseDAGFactory(ABC):
 
     def create_dag(self) -> DAG:
         """Crea la instancia del DAG"""
+        schedule = self._build_schedule()
+        schedule_kwargs = (
+            {"schedule": schedule}
+            if isinstance(schedule, list)
+            else {"schedule_interval": schedule}
+        )
         self.dag = DAG(
             dag_id=self.metadata.dag_id,
             default_args=self._build_default_args(),
             description=self.metadata.description,
-            schedule_interval=self._build_schedule(),
+            **schedule_kwargs,
             start_date=pendulum.datetime(
                 self.metadata.start_year,
                 self.metadata.start_month,
