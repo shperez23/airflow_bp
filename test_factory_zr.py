@@ -468,6 +468,54 @@ def test_factory_builds_dataset_filter_when_dataset_origen_provided():
     assert hasattr(schedule[0], "uri")
 
 
+def test_factory_supports_multiple_dataset_origenes():
+    metadata = factory_zr.DAGMetadata(
+        **_base_config(
+            [
+                {
+                    "workflow_name": "wf",
+                    "id_ingesta": "ID1",
+                    "talla": "M",
+                    "nombre_tabla": "DESTINO",
+                    "dataset_origen": ["ORIGEN_A", "ORIGEN_B"],
+                }
+            ]
+        )
+    )
+    global_config = factory_zr.GlobalConfig(
+        path_utils="./dags",
+        ruta_primaria_ds="/ruta",
+        ruta_grupo="/home/grupo",
+        timezone="America/Guayaquil",
+    )
+    operator_config = factory_zr.OperatorConfig(
+        connection_id="rocket-connectors",
+        retries_status=100,
+        status_polling_frequency=30,
+        extended_audit_info=True,
+        params_lists_base=["Environment", "SparkConfigurations"],
+    )
+
+    factory = factory_zr.RocketDAGFactory(metadata, global_config, operator_config)
+    task_groups = factory.build_tasks()
+
+    assert len(task_groups) == 1
+    dataset_filter, sensor, rocket, dataset = task_groups[0]
+
+    assert dataset_filter is not None
+    assert dataset_filter.task_id.startswith(factory_zr.TASK_PREFIX_FILTER)
+    assert sensor is None
+    assert rocket is not None
+    assert dataset is not None
+
+    schedule = factory._build_schedule()
+    assert isinstance(schedule, list)
+    assert {dataset.uri for dataset in schedule} == {
+        "/ruta/ORIGEN_A",
+        "/ruta/ORIGEN_B",
+    }
+
+
 def test_set_dependencies_creates_fin_pipeline_downstream_of_each_dataset():
     metadata = factory_zr.DAGMetadata(
         **_base_config(
