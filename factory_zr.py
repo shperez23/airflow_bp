@@ -38,7 +38,13 @@ from airflow import DAG
 from airflow.models.param import Param
 from datetime import datetime, timedelta
 from airflow.operators.dummy import DummyOperator
-from airflow.datasets import Dataset
+import airflow.datasets as datasets
+
+Dataset = datasets.Dataset
+DatasetAny = getattr(datasets, "DatasetAny", None)
+DatasetOr = getattr(datasets, "DatasetOr", None)
+DATASET_ANY_AVAILABLE = DatasetAny is not None
+DATASET_OR_AVAILABLE = DatasetOr is not None
 from airflow.sensors.time_sensor import TimeSensor
 
 # Sensor deferrable - NO ocupa workers, usa Triggerer
@@ -428,11 +434,10 @@ class BaseDAGFactory(ABC):
         schedule = self._build_schedule()
 
         # Airflow 2.0+ usa parámetros diferentes según el tipo de schedule
-        schedule_kwargs = (
-            {"schedule": schedule}  # Para datasets (lista)
-            if isinstance(schedule, list)
-            else {"schedule_interval": schedule}  # Para cron (string/None)
-        )
+        if self._is_dataset_schedule(schedule):
+            schedule_kwargs = {"schedule": schedule}
+        else:
+            schedule_kwargs = {"schedule_interval": schedule}
 
         self.dag = DAG(
             dag_id=self.metadata.dag_id,
@@ -455,7 +460,7 @@ class BaseDAGFactory(ABC):
         return self.dag
 
     @abstractmethod
-    def _build_schedule(self) -> Union[str, List[Dataset], None]:
+    def _build_schedule(self) -> Union[str, List[Dataset], Any, None]:
         """
         Método abstracto: construir schedule del DAG.
 
@@ -465,6 +470,19 @@ class BaseDAGFactory(ABC):
             - None: Solo ejecución manual
         """
         pass
+
+    @staticmethod
+    def _is_dataset_schedule(schedule: Any) -> bool:
+        """Identifica si el schedule corresponde a datasets (event-driven)."""
+        if isinstance(schedule, list):
+            return all(isinstance(item, Dataset) for item in schedule)
+        if isinstance(schedule, Dataset):
+            return True
+        if DATASET_ANY_AVAILABLE and isinstance(schedule, DatasetAny):
+            return True
+        if DATASET_OR_AVAILABLE and isinstance(schedule, DatasetOr):
+            return True
+        return False
 
     @abstractmethod
     def build_tasks(self) -> List:
@@ -511,7 +529,7 @@ class RocketDAGFactory(BaseDAGFactory):
         - Si mezcla → Modo HÍBRIDO (event-driven + sensores de tiempo)
 
         Returns:
-            - List[Dataset]: Si hay dataset_origen en algún flujo (event-driven)
+            - List[Dataset]/DatasetAny/DatasetOr: Si hay dataset_origen en algún flujo (event-driven)
             - str/None: Si no hay dataset_origen (programado tradicional)
 
         Example:
@@ -528,7 +546,7 @@ class RocketDAGFactory(BaseDAGFactory):
                 {"dataset_origen": "tabla_raw", "horario": "10:00"},
                 {"dataset_origen": "tabla_raw2"}
             ]
-            → schedule = [Dataset("/path/tabla_raw"), Dataset("/path/tabla_raw2")]
+            → schedule = DatasetAny(Dataset("/path/tabla_raw"), Dataset("/path/tabla_raw2"))
             → Los sensores de tiempo se aplican dentro del DAG
         """
         dataset_origenes = [flujo.dataset_origen for flujo in self.metadata.flujos]
@@ -540,7 +558,7 @@ class RocketDAGFactory(BaseDAGFactory):
         # Sin dataset_origen → usar schedule programado tradicional
         return self.metadata.schedule
 
-    def _build_dataset_schedule(self) -> List[Dataset]:
+    def _build_dataset_schedule(self) -> Union[List[Dataset], Any]:
         """
         Construye lista de datasets únicos para event-driven scheduling.
 
@@ -556,7 +574,7 @@ class RocketDAGFactory(BaseDAGFactory):
                 {"dataset_origen": "tabla_b"},
                 {"dataset_origen": "tabla_a"},  # Duplicado
             ]
-            → [Dataset("/path/tabla_a"), Dataset("/path/tabla_b")]
+            → DatasetAny(Dataset("/path/tabla_a"), Dataset("/path/tabla_b"))
 
         Note:
             El DAG se disparará cuando CUALQUIERA de estos datasets se actualice.
@@ -567,7 +585,12 @@ class RocketDAGFactory(BaseDAGFactory):
             for flujo in self.metadata.flujos
             if flujo.dataset_origen
         }
-        return [Dataset(path) for path in sorted(dataset_paths)]
+        datasets = [Dataset(path) for path in sorted(dataset_paths)]
+        if DATASET_ANY_AVAILABLE:
+            return DatasetAny(*datasets)
+        if DATASET_OR_AVAILABLE:
+            return DatasetOr(*datasets)
+        return datasets
 
     def _build_params_lists(self, talla: str) -> List[str]:
         """Construye lista de parámetros para RocketOperator"""
