@@ -138,10 +138,10 @@ DEFAULT_DAYS_BACK_TO = 1  # Por defecto, 1 día atrás para fecha_hasta
 TEMPLATE_FECHA_DESDE = "{{ params.fecha_desde }}"
 TEMPLATE_FECHA_HASTA = "{{ params.fecha_hasta }}"
 TEMPLATE_EVENT_FECHA_DESDE = (
-    "{{ event_param(triggering_dataset_events, 'fecha_desde', params.fecha_desde) }}"
+    f"{{{{ event_param(triggering_dataset_events, '{PARAM_FECHA_DESDE}', params.fecha_desde) }}}}"
 )
 TEMPLATE_EVENT_FECHA_HASTA = (
-    "{{ event_param(triggering_dataset_events, 'fecha_hasta', params.fecha_hasta) }}"
+    f"{{{{ event_param(triggering_dataset_events, '{PARAM_FECHA_HASTA}', params.fecha_hasta) }}}}"
 )
 TEMPLATE_DAG_ID = "{{ dag.dag_id }}"
 TEMPLATE_RUN_ID = "{{ run_id }}"
@@ -736,8 +736,8 @@ class RocketDAGFactory(BaseDAGFactory):
     def _build_dataset(self, nombre_tabla: str) -> Dataset:
         dataset_path = self._build_dataset_path(nombre_tabla)
         extra = {
-            "fecha_desde": TEMPLATE_EVENT_FECHA_DESDE,
-            "fecha_hasta": TEMPLATE_EVENT_FECHA_HASTA,
+            PARAM_FECHA_DESDE: TEMPLATE_EVENT_FECHA_DESDE,
+            PARAM_FECHA_HASTA: TEMPLATE_EVENT_FECHA_HASTA,
         }
 
         if self._dataset_init_supports("extra"):
