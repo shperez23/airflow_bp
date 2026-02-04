@@ -70,6 +70,7 @@ from providers.stratio.rocket.operators.rocket_operator import RocketOperator
 import pendulum
 import pytz
 from typing import List, Dict, Tuple, Optional, Callable, Any, Union, Iterable
+import json
 from dataclasses import dataclass
 import sys
 
@@ -169,18 +170,44 @@ def _flatten_triggering_events(triggering_dataset_events: Any) -> List[Any]:
     return events
 
 
+def _coerce_event_extra(extra: Any) -> Optional[Dict[str, Any]]:
+    if extra is None:
+        return None
+    if isinstance(extra, dict):
+        return extra
+    if isinstance(extra, str):
+        try:
+            parsed = json.loads(extra)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _extract_param_value(extra: Dict[str, Any], name: str) -> Optional[str]:
+    if name not in extra:
+        return None
+    value = extra[name]
+    if isinstance(value, dict) and "value" in value:
+        return str(value["value"])
+    return str(value)
+
+
 def event_param(triggering_dataset_events: Any, name: str, fallback: str) -> str:
     if not triggering_dataset_events:
         return fallback
 
     for event in _flatten_triggering_events(triggering_dataset_events):
         if isinstance(event, dict):
-            extra = event.get("extra") or event.get("metadata")
+            extra_raw = event.get("extra") or event.get("metadata")
         else:
-            extra = getattr(event, "extra", None)
+            extra_raw = getattr(event, "extra", None)
 
-        if isinstance(extra, dict) and name in extra:
-            return extra[name]
+        extra = _coerce_event_extra(extra_raw)
+        if extra:
+            value = _extract_param_value(extra, name)
+            if value is not None:
+                return value
 
     return fallback
 
@@ -709,8 +736,8 @@ class RocketDAGFactory(BaseDAGFactory):
     def _build_dataset(self, nombre_tabla: str) -> Dataset:
         dataset_path = self._build_dataset_path(nombre_tabla)
         extra = {
-            "fecha_desde": TEMPLATE_FECHA_DESDE,
-            "fecha_hasta": TEMPLATE_FECHA_HASTA,
+            "fecha_desde": TEMPLATE_EVENT_FECHA_DESDE,
+            "fecha_hasta": TEMPLATE_EVENT_FECHA_HASTA,
         }
 
         if self._dataset_init_supports("extra"):
