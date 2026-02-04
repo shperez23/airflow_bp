@@ -37,6 +37,7 @@ from abc import ABC, abstractmethod
 from airflow import DAG
 from airflow.models.param import Param
 from datetime import datetime, timedelta
+import inspect
 from airflow.operators.dummy import DummyOperator
 import airflow.datasets as datasets
 
@@ -135,6 +136,12 @@ DEFAULT_DAYS_BACK_TO = 1  # Por defecto, 1 día atrás para fecha_hasta
 # Jinja templates
 TEMPLATE_FECHA_DESDE = "{{ params.fecha_desde }}"
 TEMPLATE_FECHA_HASTA = "{{ params.fecha_hasta }}"
+TEMPLATE_EVENT_FECHA_DESDE = (
+    "{{ event_param(triggering_dataset_events, 'fecha_desde', params.fecha_desde) }}"
+)
+TEMPLATE_EVENT_FECHA_HASTA = (
+    "{{ event_param(triggering_dataset_events, 'fecha_hasta', params.fecha_hasta) }}"
+)
 TEMPLATE_DAG_ID = "{{ dag.dag_id }}"
 TEMPLATE_RUN_ID = "{{ run_id }}"
 
@@ -145,6 +152,37 @@ DESC_FECHA_HASTA = "Fecha hora hasta (YYYY-MM-DD HH:MM:SS)"
 # Callback status
 STATUS_SUCCESS = 0
 STATUS_FAILURE = 1
+
+
+def _flatten_triggering_events(triggering_dataset_events: Any) -> List[Any]:
+    if isinstance(triggering_dataset_events, dict):
+        items = triggering_dataset_events.values()
+    else:
+        items = triggering_dataset_events
+
+    events: List[Any] = []
+    for item in items:
+        if isinstance(item, (list, tuple, set)):
+            events.extend(item)
+        else:
+            events.append(item)
+    return events
+
+
+def event_param(triggering_dataset_events: Any, name: str, fallback: str) -> str:
+    if not triggering_dataset_events:
+        return fallback
+
+    for event in _flatten_triggering_events(triggering_dataset_events):
+        if isinstance(event, dict):
+            extra = event.get("extra") or event.get("metadata")
+        else:
+            extra = getattr(event, "extra", None)
+
+        if isinstance(extra, dict) and name in extra:
+            return extra[name]
+
+    return fallback
 
 
 # ============================================================================
@@ -385,7 +423,7 @@ class BaseDAGFactory(ABC):
             ),
         }
 
- def _generate_days_back_description(self) -> str:
+    def _generate_days_back_description(self) -> str:
         """
         Genera descripción legible del rango de días hacia atrás.
 
@@ -456,6 +494,7 @@ class BaseDAGFactory(ABC):
             params=self._build_dag_params(),
             tags=self.metadata.tags,
             on_success_callback=self._build_success_callback(),
+            user_defined_macros={"event_param": event_param},
         )
         return self.dag
 
@@ -627,8 +666,8 @@ class RocketDAGFactory(BaseDAGFactory):
         """Construye parámetros extra para RocketOperator"""
         base_params = [
             {"name": PARAM_ID_GRUPO, "value": flujo.id_ingesta},
-            {"name": PARAM_FECHA_DESDE, "value": TEMPLATE_FECHA_DESDE},
-            {"name": PARAM_FECHA_HASTA, "value": TEMPLATE_FECHA_HASTA},
+            {"name": PARAM_FECHA_DESDE, "value": TEMPLATE_EVENT_FECHA_DESDE},
+            {"name": PARAM_FECHA_HASTA, "value": TEMPLATE_EVENT_FECHA_HASTA},
             {"name": PARAM_ENVIO_CORREO, "value": DEFAULT_ENVIO_CORREO},
             {"name": PARAM_LIMIT, "value": DEFAULT_LIMIT},
             {"name": PARAM_DAG_ID, "value": TEMPLATE_DAG_ID},
@@ -660,12 +699,32 @@ class RocketDAGFactory(BaseDAGFactory):
         """Construye la ruta del dataset"""
         return f"{self.global_config.ruta_primaria_ds}/{nombre_tabla}"
 
+    @staticmethod
+    def _dataset_init_supports(arg_name: str) -> bool:
+        try:
+            return arg_name in inspect.signature(Dataset).parameters
+        except (TypeError, ValueError):
+            return False
+
+    def _build_dataset(self, nombre_tabla: str) -> Dataset:
+        dataset_path = self._build_dataset_path(nombre_tabla)
+        extra = {
+            "fecha_desde": TEMPLATE_FECHA_DESDE,
+            "fecha_hasta": TEMPLATE_FECHA_HASTA,
+        }
+
+        if self._dataset_init_supports("extra"):
+            return Dataset(dataset_path, extra=extra)
+        if self._dataset_init_supports("metadata"):
+            return Dataset(dataset_path, metadata=extra)
+        return Dataset(dataset_path)
+
     def _build_dataset_operator(self, nombre_tabla: str) -> DummyOperator:
         """Construye un DummyOperator para dataset"""
-        dataset_path = self._build_dataset_path(nombre_tabla)
+        dataset = self._build_dataset(nombre_tabla)
         return DummyOperator(
             task_id=f"{TASK_PREFIX_DATASET}{nombre_tabla.lower()}",
-            outlets=[Dataset(dataset_path)],
+            outlets=[dataset],
             retry_delay=timedelta(minutes=1),
         )
 

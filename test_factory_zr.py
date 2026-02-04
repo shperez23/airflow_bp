@@ -468,6 +468,23 @@ def test_factory_builds_dataset_filter_when_dataset_origen_provided():
     assert hasattr(schedule[0], "uri")
 
 
+def test_event_param_returns_fallback_when_no_events():
+    assert factory_zr.event_param(None, "fecha_desde", "fallback") == "fallback"
+
+
+def test_event_param_reads_extra_from_triggering_events_dict():
+    triggering_dataset_events = {
+        "/ruta/tabla": [{"extra": {"fecha_desde": "2024-01-01 00:00:00"}}]
+    }
+
+    assert (
+        factory_zr.event_param(
+            triggering_dataset_events, "fecha_desde", "fallback"
+        )
+        == "2024-01-01 00:00:00"
+    )
+
+
 def test_set_dependencies_creates_fin_pipeline_downstream_of_each_dataset():
     metadata = factory_zr.DAGMetadata(
         **_base_config(
