@@ -469,17 +469,22 @@ def test_factory_builds_dataset_filter_when_dataset_origen_provided():
 
 
 def test_event_param_returns_fallback_when_no_events():
-    assert factory_zr.event_param(None, "fecha_desde", "fallback") == "fallback"
+    assert (
+        factory_zr.event_param(None, factory_zr.PARAM_FECHA_DESDE, "fallback")
+        == "fallback"
+    )
 
 
 def test_event_param_reads_extra_from_triggering_events_dict():
     triggering_dataset_events = {
-        "/ruta/tabla": [{"extra": {"fecha_desde": "2024-01-01 00:00:00"}}]
+        "/ruta/tabla": [
+            {"extra": {factory_zr.PARAM_FECHA_DESDE: "2024-01-01 00:00:00"}}
+        ]
     }
 
     assert (
         factory_zr.event_param(
-            triggering_dataset_events, "fecha_desde", "fallback"
+            triggering_dataset_events, factory_zr.PARAM_FECHA_DESDE, "fallback"
         )
         == "2024-01-01 00:00:00"
     )
@@ -488,13 +493,15 @@ def test_event_param_reads_extra_from_triggering_events_dict():
 def test_event_param_reads_stringified_extra_payload():
     triggering_dataset_events = {
         "/ruta/tabla": [
-            {"extra": '{"fecha_desde": "2024-02-01 00:00:00", "fecha_hasta": "2024-02-01 23:59:59"}'}
+            {
+                "extra": '{"P_FECHA_DESDE": "2024-02-01 00:00:00", "P_FECHA_HASTA": "2024-02-01 23:59:59"}'
+            }
         ]
     }
 
     assert (
         factory_zr.event_param(
-            triggering_dataset_events, "fecha_hasta", "fallback"
+            triggering_dataset_events, factory_zr.PARAM_FECHA_HASTA, "fallback"
         )
         == "2024-02-01 23:59:59"
     )
@@ -503,13 +510,17 @@ def test_event_param_reads_stringified_extra_payload():
 def test_event_param_reads_value_wrapped_payload():
     triggering_dataset_events = {
         "/ruta/tabla": [
-            {"extra": {"fecha_desde": {"value": "2024-03-01 00:00:00"}}}
+            {
+                "extra": {
+                    factory_zr.PARAM_FECHA_DESDE: {"value": "2024-03-01 00:00:00"}
+                }
+            }
         ]
     }
 
     assert (
         factory_zr.event_param(
-            triggering_dataset_events, "fecha_desde", "fallback"
+            triggering_dataset_events, factory_zr.PARAM_FECHA_DESDE, "fallback"
         )
         == "2024-03-01 00:00:00"
     )

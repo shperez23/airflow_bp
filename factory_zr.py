@@ -135,13 +135,13 @@ DEFAULT_DAYS_BACK_FROM = 1  # Por defecto, 1 día atrás para fecha_desde
 DEFAULT_DAYS_BACK_TO = 1  # Por defecto, 1 día atrás para fecha_hasta
 
 # Jinja templates
-TEMPLATE_FECHA_DESDE = "{{ params.fecha_desde }}"
-TEMPLATE_FECHA_HASTA = "{{ params.fecha_hasta }}"
+TEMPLATE_FECHA_DESDE = "{{ params.P_FECHA_DESDE }}"
+TEMPLATE_FECHA_HASTA = "{{ params.P_FECHA_HASTA }}"
 TEMPLATE_EVENT_FECHA_DESDE = (
-    "{{ event_param(triggering_dataset_events, 'fecha_desde', params.fecha_desde) }}"
+    "{{ event_param(triggering_dataset_events, 'P_FECHA_DESDE', params.P_FECHA_DESDE) }}"
 )
 TEMPLATE_EVENT_FECHA_HASTA = (
-    "{{ event_param(triggering_dataset_events, 'fecha_hasta', params.fecha_hasta) }}"
+    "{{ event_param(triggering_dataset_events, 'P_FECHA_HASTA', params.P_FECHA_HASTA) }}"
 )
 TEMPLATE_DAG_ID = "{{ dag.dag_id }}"
 TEMPLATE_RUN_ID = "{{ run_id }}"
@@ -407,12 +407,12 @@ class BaseDAGFactory(ABC):
         Construye parámetros de fecha para el DAG basados en days_back_from y days_back_to.
 
         Returns:
-            Dict con parámetros 'fecha_desde' y 'fecha_hasta' (tipo Param de Airflow)
+            Dict con parámetros 'P_FECHA_DESDE' y 'P_FECHA_HASTA' (tipo Param de Airflow)
 
         Example:
             Si days_back_from=7 y days_back_to=1:
-            - fecha_desde: hace 7 días a las 00:00:00
-            - fecha_hasta: hace 1 día a las 23:59:59
+            - P_FECHA_DESDE: hace 7 días a las 00:00:00
+            - P_FECHA_HASTA: hace 1 día a las 23:59:59
         """
         now = datetime.now(self.global_config.timezone_obj)
 
@@ -438,12 +438,12 @@ class BaseDAGFactory(ABC):
         days_back_description = self._generate_days_back_description()
 
         return {
-            "fecha_desde": Param(
+            PARAM_FECHA_DESDE: Param(
                 default=fecha_desde_datetime.strftime(DATETIME_FORMAT),
                 type="string",
                 description=f"{DESC_FECHA_DESDE}{days_back_description}",
             ),
-            "fecha_hasta": Param(
+            PARAM_FECHA_HASTA: Param(
                 default=fecha_hasta_datetime.strftime(DATETIME_FORMAT),
                 type="string",
                 description=f"{DESC_FECHA_HASTA}{days_back_description}",
@@ -736,8 +736,8 @@ class RocketDAGFactory(BaseDAGFactory):
     def _build_dataset(self, nombre_tabla: str) -> Dataset:
         dataset_path = self._build_dataset_path(nombre_tabla)
         extra = {
-            "fecha_desde": TEMPLATE_EVENT_FECHA_DESDE,
-            "fecha_hasta": TEMPLATE_EVENT_FECHA_HASTA,
+            PARAM_FECHA_DESDE: TEMPLATE_EVENT_FECHA_DESDE,
+            PARAM_FECHA_HASTA: TEMPLATE_EVENT_FECHA_HASTA,
         }
 
         if self._dataset_init_supports("extra"):
