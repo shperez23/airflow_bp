@@ -485,6 +485,36 @@ def test_event_param_reads_extra_from_triggering_events_dict():
     )
 
 
+def test_event_param_reads_stringified_extra_payload():
+    triggering_dataset_events = {
+        "/ruta/tabla": [
+            {"extra": '{"fecha_desde": "2024-02-01 00:00:00", "fecha_hasta": "2024-02-01 23:59:59"}'}
+        ]
+    }
+
+    assert (
+        factory_zr.event_param(
+            triggering_dataset_events, "fecha_hasta", "fallback"
+        )
+        == "2024-02-01 23:59:59"
+    )
+
+
+def test_event_param_reads_value_wrapped_payload():
+    triggering_dataset_events = {
+        "/ruta/tabla": [
+            {"extra": {"fecha_desde": {"value": "2024-03-01 00:00:00"}}}
+        ]
+    }
+
+    assert (
+        factory_zr.event_param(
+            triggering_dataset_events, "fecha_desde", "fallback"
+        )
+        == "2024-03-01 00:00:00"
+    )
+
+
 def test_set_dependencies_creates_fin_pipeline_downstream_of_each_dataset():
     metadata = factory_zr.DAGMetadata(
         **_base_config(
