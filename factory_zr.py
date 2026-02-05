@@ -4,7 +4,7 @@ Clase padre abstracta y clases hijas especializadas.
 Principios: Clean Code, SOLID, DRY.
 SIN valores por defecto ni datos quemados.
 
-VERSION 4: Framework Event-Driven con Optimizaciones Automáticas
+VERSION 4.1: Framework Event-Driven con Optimizaciones Automáticas + Control de Sensores
 Desarrollo asistido por IA - Febrero 2026
 
 FUNCIONALIDADES PRINCIPALES:
@@ -15,6 +15,9 @@ FUNCIONALIDADES PRINCIPALES:
 - ✅ Soporte híbrido: programado + event-driven en el mismo DAG
 - ✅ Cálculo dinámico de rangos de fechas con days_back_from/days_back_to
 - ✅ Configuración por flujo de sensores (poke_interval, timeout, deferrable)
+- ✅ Control de comportamiento de sensores cuando DAG inicia tarde (sensor_skip_if_past)
+- ✅ retries_status=300, ajustado a una ejecución  de tiempo maximo de 5h
+- ✅status_polling_frequency=60, para que se realice la consulta de la ekjecución cada 60s, calculo 300*60=18000/60= 300 min
 
 MODOS DE EJECUCIÓN SOPORTADOS:
 1. Programado Simple: Schedule cron, ejecución inmediata
@@ -28,6 +31,41 @@ OPTIMIZACIONES AUTOMÁTICAS (sin configuración):
 - Filtrado condicional de flujos según dataset disparador
 - Publicación de dataset por cada flujo para linaje de datos
 
+NUEVO EN VERSION 4.1 - CONTROL DE SENSORES TARDÍOS:
+
+Problema resuelto:
+  Si un DAG con horario 02:30 inicia a las 18:00 (después de la hora configurada),
+  el comportamiento default es esperar 24 horas hasta las 02:30 del día siguiente.
+  Esto puede no ser deseable en ciertos escenarios (ej: recuperación de fallos).
+
+Solución - Parámetro sensor_skip_if_past:
+  Nuevo campo opcional en FlujoConfig que controla el comportamiento del sensor:
+
+  • None (default): Espera hasta mañana - comportamiento actual, 100% compatible
+  • False: Explícitamente espera hasta mañana - igual que None
+  • True: Ejecuta INMEDIATAMENTE si la hora ya pasó - nuevo comportamiento
+
+Lógica para sensores compartidos (mismo horario):
+  Si múltiples flujos comparten horario, el factory usa lógica AND conservadora:
+
+  • TODOS los flujos con skip=True → sensor ejecuta inmediatamente si hora pasó
+  • AL MENOS UNO con skip=False/None → sensor espera hasta mañana (protege flujo estricto)
+
+Ejemplo de uso:
+  {
+      "horario": "02:30:00",
+      "sensor_skip_if_past": True,  # Ejecuta inmediatamente si DAG inicia después de 02:30
+  }
+
+Casos de uso recomendados:
+  • sensor_skip_if_past=True:  Recuperación automática de ejecuciones fallidas
+  • sensor_skip_if_past=False: Integración con sistemas externos (ventanas estrictas)
+  • sensor_skip_if_past=None:  Default - comportamiento tradicional (compatibilidad)
+
+Compatibilidad:
+  100% compatible con versiones anteriores. DAGs existentes sin este parámetro
+  funcionan exactamente igual (default=None mantiene comportamiento actual).
+
 AUTORÍA:
 Desarrollado por el equipo de Ingeniería de Datos con asistencia de IA.
 Diseño orientado a arquitecturas modernas de data mesh y event-driven.
@@ -37,8 +75,16 @@ from abc import ABC, abstractmethod
 from airflow import DAG
 from airflow.models.param import Param
 from datetime import datetime, timedelta
+import inspect
+
 from airflow.operators.dummy import DummyOperator
-from airflow.datasets import Dataset
+import airflow.datasets as datasets
+
+Dataset = datasets.Dataset
+DatasetAny = getattr(datasets, "DatasetAny", None)
+DatasetOr = getattr(datasets, "DatasetOr", None)
+DATASET_ANY_AVAILABLE = DatasetAny is not None
+DATASET_OR_AVAILABLE = DatasetOr is not None
 from airflow.sensors.time_sensor import TimeSensor
 
 # Sensor deferrable - NO ocupa workers, usa Triggerer
@@ -63,6 +109,8 @@ from providers.stratio.rocket.operators.rocket_operator import RocketOperator
 import pendulum
 import pytz
 from typing import List, Dict, Tuple, Optional, Callable, Any, Union, Iterable
+import json
+
 from dataclasses import dataclass
 import sys
 
@@ -120,6 +168,7 @@ PARAM_FETCH_SIZE_ASSIGNED = "P_FETCH_SIZE_ASSIGNED"
 PARAM_PERSISTENT_VOLUMEN_GB = "P_PERSISTENT_VOLUMEN_GB"
 PARAM_ENABLE_MD5 = "P_ENABLE_MD5"
 
+
 # Valores por defecto de parámetros
 DEFAULT_ENVIO_CORREO = "0"
 DEFAULT_LIMIT = " "
@@ -129,6 +178,8 @@ DEFAULT_DAYS_BACK_TO = 1  # Por defecto, 1 día atrás para fecha_hasta
 # Jinja templates
 TEMPLATE_FECHA_DESDE = "{{ params.fecha_desde }}"
 TEMPLATE_FECHA_HASTA = "{{ params.fecha_hasta }}"
+TEMPLATE_EVENT_FECHA_DESDE = f"{{{{ event_param(triggering_dataset_events, '{PARAM_FECHA_DESDE}', params.fecha_desde) }}}}"
+TEMPLATE_EVENT_FECHA_HASTA = f"{{{{ event_param(triggering_dataset_events, '{PARAM_FECHA_HASTA}', params.fecha_hasta) }}}}"
 TEMPLATE_DAG_ID = "{{ dag.dag_id }}"
 TEMPLATE_RUN_ID = "{{ run_id }}"
 
@@ -139,6 +190,63 @@ DESC_FECHA_HASTA = "Fecha hora hasta (YYYY-MM-DD HH:MM:SS)"
 # Callback status
 STATUS_SUCCESS = 0
 STATUS_FAILURE = 1
+
+
+def _flatten_triggering_events(triggering_dataset_events: Any) -> List[Any]:
+    if isinstance(triggering_dataset_events, dict):
+        items = triggering_dataset_events.values()
+    else:
+        items = triggering_dataset_events
+
+    events: List[Any] = []
+    for item in items:
+        if isinstance(item, (list, tuple, set)):
+            events.extend(item)
+        else:
+            events.append(item)
+        return events
+
+
+def _coerce_event_extra(extra: Any) -> Optional[Dict[str, Any]]:
+    if extra is None:
+        return None
+    if isinstance(extra, dict):
+        return extra
+    if isinstance(extra, str):
+        try:
+            parsed = json.loads(extra)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _extract_param_value(extra: Dict[str, Any], name: str) -> Optional[str]:
+    if name not in extra:
+        return None
+    value = extra[name]
+    if isinstance(value, dict) and "value" in value:
+        return str(value["value"])
+    return str(value)
+
+
+def event_param(triggering_dataset_events: Any, name: str, fallback: str) -> str:
+    if not triggering_dataset_events:
+        return fallback
+
+    for event in _flatten_triggering_events(triggering_dataset_events):
+        if isinstance(event, dict):
+            extra_raw = event.get("extra") or event.get("metadata")
+        else:
+            extra_raw = getattr(event, "extra", None)
+
+        extra = _coerce_event_extra(extra_raw)
+        if extra:
+            value = _extract_param_value(extra, name)
+            if value is not None:
+                return value
+
+    return fallback
 
 
 # ============================================================================
@@ -200,7 +308,8 @@ class DAGMetadata:
     days_back_from: int = DEFAULT_DAYS_BACK_FROM  # Días hacia atrás para fecha_desde
     days_back_to: int = DEFAULT_DAYS_BACK_TO  # Días hacia atrás para fecha_hasta
 
-    def __post_init__(self):
+
+def __post_init__(self):
         if self.schedule.lower() == "none":
             self.schedule = None
 
@@ -261,6 +370,9 @@ class FlujoConfig:
     sensor_poke_interval: Optional[int] = None  # Intervalo de chequeo en segundos
     sensor_timeout: Optional[int] = None  # Timeout en segundos
     use_deferrable: Optional[bool] = None  # Usar sensor deferrable (no ocupa workers)
+    sensor_skip_if_past: Optional[bool] = (
+        None  # Si True, ejecuta inmediatamente si hora ya pasó
+    )
 
     p_num_ingestas_concurrente: Optional[Union[int, str]] = None
     p_nativo_lparticiones: Optional[Union[int, str]] = None
@@ -308,15 +420,15 @@ class BaseDAGFactory(ABC):
         self.metadata = metadata
         self.global_config = global_config
         self.operator_config = operator_config
-        self.notifica = self._load_notifica()
+        self.notifica_v2 = self._load_notifica()
         self.dag: Optional[DAG] = None
 
     def _load_notifica(self):
         """Carga módulo de notificaciones"""
         try:
-            import notifica
+            import notifica_v2
 
-            return notifica
+            return notifica_v2
         except ImportError:
             return None
 
@@ -354,7 +466,8 @@ class BaseDAGFactory(ABC):
             microsecond=0,
         )
 
-        # Calcular fecha_hasta: fin del día de hace N días
+
+ # Calcular fecha_hasta: fin del día de hace N días
         fecha_hasta_date = now - timedelta(days=self.metadata.days_back_to)
         fecha_hasta_datetime = fecha_hasta_date.replace(
             hour=DAY_END_HOUR,
@@ -379,7 +492,7 @@ class BaseDAGFactory(ABC):
             ),
         }
 
- def _generate_days_back_description(self) -> str:
+    def _generate_days_back_description(self) -> str:
         """
         Genera descripción legible del rango de días hacia atrás.
 
@@ -396,9 +509,9 @@ class BaseDAGFactory(ABC):
 
     def _build_success_callback(self) -> Optional[Callable]:
         """Construye callback de éxito"""
-        if not self.notifica:
+        if not self.notifica_v2:
             return None
-        return lambda context: self.notifica.send_notification(
+        return lambda context: self.notifica_v2.send_notification(
             context,
             codigo_malla=self.metadata.codigo_malla,
             status=STATUS_SUCCESS,
@@ -407,9 +520,9 @@ class BaseDAGFactory(ABC):
 
     def _build_failure_callback(self, extra_message: str) -> Optional[Callable]:
         """Construye callback de fallo"""
-        if not self.notifica:
+        if not self.notifica_v2:
             return None
-        return lambda context: self.notifica.send_notification(
+        return lambda context: self.notifica_v2.send_notification(
             context,
             codigo_malla=self.metadata.codigo_malla,
             status=STATUS_FAILURE,
@@ -428,11 +541,10 @@ class BaseDAGFactory(ABC):
         schedule = self._build_schedule()
 
         # Airflow 2.0+ usa parámetros diferentes según el tipo de schedule
-        schedule_kwargs = (
-            {"schedule": schedule}  # Para datasets (lista)
-            if isinstance(schedule, list)
-            else {"schedule_interval": schedule}  # Para cron (string/None)
-        )
+        if self._is_dataset_schedule(schedule):
+            schedule_kwargs = {"schedule": schedule}
+        else:
+            schedule_kwargs = {"schedule_interval": schedule}
 
         self.dag = DAG(
             dag_id=self.metadata.dag_id,
@@ -451,11 +563,12 @@ class BaseDAGFactory(ABC):
             params=self._build_dag_params(),
             tags=self.metadata.tags,
             on_success_callback=self._build_success_callback(),
+            user_defined_macros={"event_param": event_param},
         )
         return self.dag
 
     @abstractmethod
-    def _build_schedule(self) -> Union[str, List[Dataset], None]:
+    def _build_schedule(self) -> Union[str, List[Dataset], Any, None]:
         """
         Método abstracto: construir schedule del DAG.
 
@@ -465,6 +578,19 @@ class BaseDAGFactory(ABC):
             - None: Solo ejecución manual
         """
         pass
+
+    @staticmethod
+    def _is_dataset_schedule(schedule: Any) -> bool:
+        """Identifica si el schedule corresponde a datasets (event-driven)."""
+        if isinstance(schedule, list):
+            return all(isinstance(item, Dataset) for item in schedule)
+        if isinstance(schedule, Dataset):
+            return True
+        if DATASET_ANY_AVAILABLE and isinstance(schedule, DatasetAny):
+            return True
+        if DATASET_OR_AVAILABLE and isinstance(schedule, DatasetOr):
+            return True
+        return False
 
     @abstractmethod
     def build_tasks(self) -> List:
@@ -511,7 +637,7 @@ class RocketDAGFactory(BaseDAGFactory):
         - Si mezcla → Modo HÍBRIDO (event-driven + sensores de tiempo)
 
         Returns:
-            - List[Dataset]: Si hay dataset_origen en algún flujo (event-driven)
+            - List[Dataset]/DatasetAny/DatasetOr: Si hay dataset_origen en algún flujo (event-driven)
             - str/None: Si no hay dataset_origen (programado tradicional)
 
         Example:
@@ -528,7 +654,7 @@ class RocketDAGFactory(BaseDAGFactory):
                 {"dataset_origen": "tabla_raw", "horario": "10:00"},
                 {"dataset_origen": "tabla_raw2"}
             ]
-            → schedule = [Dataset("/path/tabla_raw"), Dataset("/path/tabla_raw2")]
+            → schedule = DatasetAny(Dataset("/path/tabla_raw"), Dataset("/path/tabla_raw2"))
             → Los sensores de tiempo se aplican dentro del DAG
         """
         dataset_origenes = [flujo.dataset_origen for flujo in self.metadata.flujos]
@@ -540,7 +666,7 @@ class RocketDAGFactory(BaseDAGFactory):
         # Sin dataset_origen → usar schedule programado tradicional
         return self.metadata.schedule
 
-    def _build_dataset_schedule(self) -> List[Dataset]:
+    def _build_dataset_schedule(self) -> Union[List[Dataset], Any]:
         """
         Construye lista de datasets únicos para event-driven scheduling.
 
@@ -556,7 +682,7 @@ class RocketDAGFactory(BaseDAGFactory):
                 {"dataset_origen": "tabla_b"},
                 {"dataset_origen": "tabla_a"},  # Duplicado
             ]
-            → [Dataset("/path/tabla_a"), Dataset("/path/tabla_b")]
+            → DatasetAny(Dataset("/path/tabla_a"), Dataset("/path/tabla_b"))
 
         Note:
             El DAG se disparará cuando CUALQUIERA de estos datasets se actualice.
@@ -567,7 +693,12 @@ class RocketDAGFactory(BaseDAGFactory):
             for flujo in self.metadata.flujos
             if flujo.dataset_origen
         }
-        return [Dataset(path) for path in sorted(dataset_paths)]
+        datasets = [Dataset(path) for path in sorted(dataset_paths)]
+        if DATASET_ANY_AVAILABLE:
+            return DatasetAny(*datasets)
+        if DATASET_OR_AVAILABLE:
+            return DatasetOr(*datasets)
+        return datasets
 
     def _build_params_lists(self, talla: str) -> List[str]:
         """Construye lista de parámetros para RocketOperator"""
@@ -604,8 +735,8 @@ class RocketDAGFactory(BaseDAGFactory):
         """Construye parámetros extra para RocketOperator"""
         base_params = [
             {"name": PARAM_ID_GRUPO, "value": flujo.id_ingesta},
-            {"name": PARAM_FECHA_DESDE, "value": TEMPLATE_FECHA_DESDE},
-            {"name": PARAM_FECHA_HASTA, "value": TEMPLATE_FECHA_HASTA},
+            {"name": PARAM_FECHA_DESDE, "value": TEMPLATE_EVENT_FECHA_DESDE},
+            {"name": PARAM_FECHA_HASTA, "value": TEMPLATE_EVENT_FECHA_HASTA},
             {"name": PARAM_ENVIO_CORREO, "value": DEFAULT_ENVIO_CORREO},
             {"name": PARAM_LIMIT, "value": DEFAULT_LIMIT},
             {"name": PARAM_DAG_ID, "value": TEMPLATE_DAG_ID},
@@ -633,16 +764,37 @@ class RocketDAGFactory(BaseDAGFactory):
             ),
         )
 
-    def _build_dataset_path(self, nombre_tabla: str) -> str:
+
+def _build_dataset_path(self, nombre_tabla: str) -> str:
         """Construye la ruta del dataset"""
         return f"{self.global_config.ruta_primaria_ds}/{nombre_tabla}"
 
+    @staticmethod
+    def _dataset_init_supports(arg_name: str) -> bool:
+        try:
+            return arg_name in inspect.signature(Dataset).parameters
+        except (TypeError, ValueError):
+            return False
+
+    def _build_dataset(self, nombre_tabla: str) -> Dataset:
+        dataset_path = self._build_dataset_path(nombre_tabla)
+        extra = {
+            PARAM_FECHA_DESDE: TEMPLATE_EVENT_FECHA_DESDE,
+            PARAM_FECHA_HASTA: TEMPLATE_EVENT_FECHA_HASTA,
+        }
+
+        if self._dataset_init_supports("extra"):
+            return Dataset(dataset_path, extra=extra)
+        if self._dataset_init_supports("metadata"):
+            return Dataset(dataset_path, metadata=extra)
+        return Dataset(dataset_path)
+
     def _build_dataset_operator(self, nombre_tabla: str) -> DummyOperator:
         """Construye un DummyOperator para dataset"""
-        dataset_path = self._build_dataset_path(nombre_tabla)
+        dataset = self._build_dataset(nombre_tabla)
         return DummyOperator(
             task_id=f"{TASK_PREFIX_DATASET}{nombre_tabla.lower()}",
-            outlets=[Dataset(dataset_path)],
+            outlets=[dataset],
             retry_delay=timedelta(minutes=1),
         )
 
@@ -653,8 +805,14 @@ class RocketDAGFactory(BaseDAGFactory):
         poke_interval: Optional[int] = None,
         timeout: Optional[int] = None,
         use_deferrable: Optional[bool] = None,
+        sensor_skip_if_past: Optional[bool] = None,
     ) -> Union[TimeSensor, Any]:
-        """Construye sensor optimizado: deferrable (NO ocupa workers) o tradicional"""
+        """Construye sensor optimizado: deferrable (NO ocupa workers) o tradicional
+
+        Args:
+            sensor_skip_if_past: Si True, sensor completa inmediatamente si hora ya pasó.
+                               Si False/None, sensor espera hasta la misma hora del día siguiente.
+        """
         task_id = f"{TASK_PREFIX_SENSOR}{nombre_tabla.lower()}"
         target_datetime = datetime.strptime(target_time, TIME_FORMAT_LONG).time()
 
@@ -673,9 +831,14 @@ class RocketDAGFactory(BaseDAGFactory):
                 datetime.combine(now.date(), target_datetime)
             )
 
-            # Si la hora ya pasó hoy, programar para mañana
+            # Si la hora ya pasó, decidir comportamiento según sensor_skip_if_past
             if target_dt <= now:
-                target_dt += timedelta(days=1)
+                if sensor_skip_if_past:
+                    # Completar inmediatamente: target_time ligeramente en el pasado
+                    target_dt = now - timedelta(seconds=1)
+                else:
+                    # Comportamiento default: reprogramar para mañana a la misma hora
+                    target_dt += timedelta(days=1)
 
             return DateTimeSensorAsync(
                 task_id=task_id,
@@ -721,7 +884,6 @@ class RocketDAGFactory(BaseDAGFactory):
             timeout=timeout,
             use_deferrable=use_deferrable,
         )
-
 
     @staticmethod
     def _extract_dataset_uris(events: Iterable[Any]) -> List[str]:
@@ -774,7 +936,8 @@ class RocketDAGFactory(BaseDAGFactory):
 
         return dataset_uris
 
-    def _should_run_for_dataset(self, dataset_uri: str, **context) -> bool:
+
+def _should_run_for_dataset(self, dataset_uri: str, **context) -> bool:
         """
         Decide si un flujo debe ejecutarse según el dataset que disparó el DAG.
 
@@ -868,7 +1031,6 @@ class RocketDAGFactory(BaseDAGFactory):
             op_kwargs={"dataset_uri": dataset_uri},
         )
 
-
     def build_tasks(
         self,
     ) -> Tuple[
@@ -926,6 +1088,9 @@ class RocketDAGFactory(BaseDAGFactory):
             min_poke_interval = None
             min_timeout = None
             any_deferrable = None
+            # sensor_skip_if_past: True SOLO si TODOS los flujos del grupo lo tienen en True
+            # Si al menos uno requiere esperar (False/None), sensor debe esperar siempre
+            all_skip_if_past = True  # Asumimos True hasta encontrar uno False/None
 
             for f in flujos_grupo:
                 if f.sensor_poke_interval is not None:
@@ -939,6 +1104,9 @@ class RocketDAGFactory(BaseDAGFactory):
                         min_timeout = f.sensor_timeout
                 if f.use_deferrable is not None:
                     any_deferrable = f.use_deferrable
+                # Si algún flujo NO tiene skip_if_past=True, el grupo NO debe skip
+                if f.sensor_skip_if_past is not True:
+                    all_skip_if_past = False
 
             # Generar nombre descriptivo para el sensor compartido
             tablas_grupo = [f.nombre_tabla for f in flujos_grupo]
@@ -954,6 +1122,7 @@ class RocketDAGFactory(BaseDAGFactory):
                 poke_interval=min_poke_interval,
                 timeout=min_timeout,
                 use_deferrable=any_deferrable,
+                sensor_skip_if_past=all_skip_if_past,
             )
             sensores_compartidos[horario] = sensor
 
@@ -1073,8 +1242,8 @@ def get_default_operator_config() -> OperatorConfig:
     """Configuración por defecto con valores optimizados de sensores"""
     return OperatorConfig(
         connection_id="rocket-connectors",
-        retries_status=100,
-        status_polling_frequency=30,
+        retries_status=300,
+        status_polling_frequency=60,
         extended_audit_info=True,
         params_lists_base=["Environment", "SparkConfigurations"],
         sensor_poke_interval=DEFAULT_POKE_INTERVAL,  # 5 minutos
@@ -1131,3 +1300,7 @@ def register_dags(
 
     for dag_id, dag in dags.items():
         globals_dict[dag_id] = dag
+
+
+
+
