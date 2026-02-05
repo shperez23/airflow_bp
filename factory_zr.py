@@ -155,6 +155,10 @@ STATUS_SUCCESS = 0
 STATUS_FAILURE = 1
 
 
+class TemplatedDatasetOperator(DummyOperator):
+    template_fields = ("outlets",)
+
+
 def _flatten_triggering_events(triggering_dataset_events: Any) -> List[Any]:
     if isinstance(triggering_dataset_events, dict):
         items = triggering_dataset_events.values()
@@ -749,7 +753,7 @@ class RocketDAGFactory(BaseDAGFactory):
     def _build_dataset_operator(self, nombre_tabla: str) -> DummyOperator:
         """Construye un DummyOperator para dataset"""
         dataset = self._build_dataset(nombre_tabla)
-        return DummyOperator(
+        return TemplatedDatasetOperator(
             task_id=f"{TASK_PREFIX_DATASET}{nombre_tabla.lower()}",
             outlets=[dataset],
             retry_delay=timedelta(minutes=1),
