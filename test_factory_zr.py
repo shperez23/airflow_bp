@@ -132,6 +132,19 @@ def _ensure_factory_module_importable():
 
     pendulum_mod.datetime = _pendulum_datetime
 
+    pytz_mod = types.ModuleType("pytz")
+
+    class _Timezone:
+        def localize(self, dt):
+            return dt
+
+    def _timezone(name):
+        if name == "Invalid/Timezone":
+            raise Exception("Invalid timezone")
+        return _Timezone()
+
+    pytz_mod.timezone = _timezone
+
     sys.modules.setdefault("airflow", airflow)
     sys.modules.setdefault("airflow.models.param", airflow_models_param)
     sys.modules.setdefault("airflow.operators.dummy", airflow_operators_dummy)
@@ -152,6 +165,7 @@ def _ensure_factory_module_importable():
     )
 
     sys.modules.setdefault("pendulum", pendulum_mod)
+    sys.modules.setdefault("pytz", pytz_mod)
 
     __import__("factory_zr")
 
@@ -203,6 +217,10 @@ class _DummyOperator(_BaseOp):
         self.retry_delay = retry_delay
 
 
+class _TemplatedDatasetOperator(_DummyOperator):
+    template_fields = ("outlets",)
+
+
 class _TimeSensor(_BaseOp):
     def __init__(
         self,
@@ -249,6 +267,12 @@ def _force_stubbed_airflow_objects(monkeypatch):
     monkeypatch.setattr(factory_zr, "Param", _Param, raising=False)
     monkeypatch.setattr(factory_zr, "Dataset", _Dataset, raising=False)
     monkeypatch.setattr(factory_zr, "DummyOperator", _DummyOperator, raising=False)
+    monkeypatch.setattr(
+        factory_zr,
+        "TemplatedDatasetOperator",
+        _TemplatedDatasetOperator,
+        raising=False,
+    )
     monkeypatch.setattr(factory_zr, "TimeSensor", _TimeSensor, raising=False)
     monkeypatch.setattr(factory_zr, "ShortCircuitOperator", _ShortCircuitOperator, raising=False)
     monkeypatch.setattr(factory_zr, "RocketOperator", _RocketOperator, raising=False)
@@ -363,11 +387,13 @@ def test_factory_builds_sensor_when_horario_provided_and_normalizes_hh_mm():
     )
 
     factory = factory_zr.RocketDAGFactory(metadata, global_config, operator_config)
-    task_groups = factory.build_tasks()
+    sensores_compartidos, task_groups = factory.build_tasks()
 
     assert len(task_groups) == 1
-    _, sensor, rocket, dataset = task_groups[0]
+    _, _, rocket, dataset = task_groups[0]
 
+    assert sensores_compartidos
+    sensor = sensores_compartidos.get("10:30:00")
     assert sensor is not None
     assert sensor.task_id.startswith(factory_zr.TASK_PREFIX_SENSOR)
 
@@ -376,7 +402,43 @@ def test_factory_builds_sensor_when_horario_provided_and_normalizes_hh_mm():
     extra = rocket.kwargs.get("extra_params")
     assert any(p["name"] == factory_zr.PARAM_ID_GRUPO and p["value"] == "ID1" for p in extra)
 
-    assert dataset.kwargs.get("outlets")
+    assert dataset.outlets
+
+
+def test_factory_uses_templated_dataset_operator_for_outlets():
+    metadata = factory_zr.DAGMetadata(
+        **_base_config(
+            [
+                {
+                    "workflow_name": "wf",
+                    "id_ingesta": "ID1",
+                    "talla": "default",
+                    "nombre_tabla": "TABLA",
+                }
+            ]
+        )
+    )
+    global_config = factory_zr.GlobalConfig(
+        path_utils="./dags",
+        ruta_primaria_ds="/ruta",
+        ruta_grupo="/home/grupo",
+        timezone="America/Guayaquil",
+    )
+    operator_config = factory_zr.OperatorConfig(
+        connection_id="rocket-connectors",
+        retries_status=100,
+        status_polling_frequency=30,
+        extended_audit_info=True,
+        params_lists_base=["Environment", "SparkConfigurations"],
+    )
+
+    factory = factory_zr.RocketDAGFactory(metadata, global_config, operator_config)
+    sensores_compartidos, task_groups = factory.build_tasks()
+
+    _, _, _, dataset = task_groups[0]
+
+    assert isinstance(dataset, factory_zr.TemplatedDatasetOperator)
+    assert "outlets" in getattr(dataset, "template_fields", ())
 
 
 def test_optional_extra_params_normalize_bool_and_include_only_non_none():
@@ -451,14 +513,14 @@ def test_factory_builds_dataset_filter_when_dataset_origen_provided():
     )
 
     factory = factory_zr.RocketDAGFactory(metadata, global_config, operator_config)
-    task_groups = factory.build_tasks()
+    sensores_compartidos, task_groups = factory.build_tasks()
 
     assert len(task_groups) == 1
-    dataset_filter, sensor, rocket, dataset = task_groups[0]
+    dataset_filter, _, rocket, dataset = task_groups[0]
 
     assert dataset_filter is not None
     assert dataset_filter.task_id.startswith(factory_zr.TASK_PREFIX_FILTER)
-    assert sensor is None
+    assert not sensores_compartidos
     assert rocket is not None
     assert dataset is not None
 
@@ -466,6 +528,53 @@ def test_factory_builds_dataset_filter_when_dataset_origen_provided():
     assert isinstance(schedule, list)
     assert schedule
     assert hasattr(schedule[0], "uri")
+
+
+def test_event_param_returns_fallback_when_no_events():
+    assert factory_zr.event_param(None, "fecha_desde", "fallback") == "fallback"
+
+
+def test_event_param_reads_extra_from_triggering_events_dict():
+    triggering_dataset_events = {
+        "/ruta/tabla": [{"extra": {"fecha_desde": "2024-01-01 00:00:00"}}]
+    }
+
+    assert (
+        factory_zr.event_param(
+            triggering_dataset_events, "fecha_desde", "fallback"
+        )
+        == "2024-01-01 00:00:00"
+    )
+
+
+def test_event_param_reads_stringified_extra_payload():
+    triggering_dataset_events = {
+        "/ruta/tabla": [
+            {"extra": '{"fecha_desde": "2024-02-01 00:00:00", "fecha_hasta": "2024-02-01 23:59:59"}'}
+        ]
+    }
+
+    assert (
+        factory_zr.event_param(
+            triggering_dataset_events, "fecha_hasta", "fallback"
+        )
+        == "2024-02-01 23:59:59"
+    )
+
+
+def test_event_param_reads_value_wrapped_payload():
+    triggering_dataset_events = {
+        "/ruta/tabla": [
+            {"extra": {"fecha_desde": {"value": "2024-03-01 00:00:00"}}}
+        ]
+    }
+
+    assert (
+        factory_zr.event_param(
+            triggering_dataset_events, "fecha_desde", "fallback"
+        )
+        == "2024-03-01 00:00:00"
+    )
 
 
 def test_set_dependencies_creates_fin_pipeline_downstream_of_each_dataset():
@@ -503,9 +612,9 @@ def test_set_dependencies_creates_fin_pipeline_downstream_of_each_dataset():
     )
 
     factory = factory_zr.RocketDAGFactory(metadata, global_config, operator_config)
-    task_groups = factory.build_tasks()
+    sensores_compartidos, task_groups = factory.build_tasks()
 
-    factory.set_dependencies(task_groups)
+    factory.set_dependencies(sensores_compartidos, task_groups)
 
     datasets = [dataset for _, _, _, dataset in task_groups]
     for dataset in datasets:

@@ -76,7 +76,6 @@ from airflow import DAG
 from airflow.models.param import Param
 from datetime import datetime, timedelta
 import inspect
-
 from airflow.operators.dummy import DummyOperator
 import airflow.datasets as datasets
 
@@ -110,7 +109,6 @@ import pendulum
 import pytz
 from typing import List, Dict, Tuple, Optional, Callable, Any, Union, Iterable
 import json
-
 from dataclasses import dataclass
 import sys
 
@@ -1300,7 +1298,3 @@ def register_dags(
 
     for dag_id, dag in dags.items():
         globals_dict[dag_id] = dag
-
-
-
-
