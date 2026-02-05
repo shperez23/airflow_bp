@@ -402,7 +402,7 @@ def test_factory_builds_sensor_when_horario_provided_and_normalizes_hh_mm():
     extra = rocket.kwargs.get("extra_params")
     assert any(p["name"] == factory_zr.PARAM_ID_GRUPO and p["value"] == "ID1" for p in extra)
 
-    assert dataset.kwargs.get("outlets")
+    assert dataset.outlets
 
 
 def test_factory_uses_templated_dataset_operator_for_outlets():
