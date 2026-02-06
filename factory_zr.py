@@ -113,6 +113,14 @@ from dataclasses import dataclass
 import sys
 
 
+class TemplatedDatasetOperator(DummyOperator):
+    template_fields = ("outlets",)
+
+
+class TemplatedDataset(Dataset):
+    template_fields = ("extra", "metadata")
+
+
 # ============================================================================
 # CONSTANTES DE FORMATO Y TIEMPOS
 # ============================================================================
@@ -202,7 +210,7 @@ def _flatten_triggering_events(triggering_dataset_events: Any) -> List[Any]:
             events.extend(item)
         else:
             events.append(item)
-        return events
+    return events
 
 
 def _coerce_event_extra(extra: Any) -> Optional[Dict[str, Any]]:
@@ -307,7 +315,7 @@ class DAGMetadata:
     days_back_to: int = DEFAULT_DAYS_BACK_TO  # Días hacia atrás para fecha_hasta
 
 
-def __post_init__(self):
+    def __post_init__(self):
         if self.schedule.lower() == "none":
             self.schedule = None
 
@@ -763,7 +771,7 @@ class RocketDAGFactory(BaseDAGFactory):
         )
 
 
-def _build_dataset_path(self, nombre_tabla: str) -> str:
+    def _build_dataset_path(self, nombre_tabla: str) -> str:
         """Construye la ruta del dataset"""
         return f"{self.global_config.ruta_primaria_ds}/{nombre_tabla}"
 
@@ -781,16 +789,22 @@ def _build_dataset_path(self, nombre_tabla: str) -> str:
             PARAM_FECHA_HASTA: TEMPLATE_EVENT_FECHA_HASTA,
         }
 
+        dataset_class = Dataset
+        if self._dataset_init_supports("extra") or self._dataset_init_supports(
+            "metadata"
+        ):
+            dataset_class = TemplatedDataset
+
         if self._dataset_init_supports("extra"):
-            return Dataset(dataset_path, extra=extra)
+            return dataset_class(dataset_path, extra=extra)
         if self._dataset_init_supports("metadata"):
-            return Dataset(dataset_path, metadata=extra)
+            return dataset_class(dataset_path, metadata=extra)
         return Dataset(dataset_path)
 
     def _build_dataset_operator(self, nombre_tabla: str) -> DummyOperator:
         """Construye un DummyOperator para dataset"""
         dataset = self._build_dataset(nombre_tabla)
-        return DummyOperator(
+        return TemplatedDatasetOperator(
             task_id=f"{TASK_PREFIX_DATASET}{nombre_tabla.lower()}",
             outlets=[dataset],
             retry_delay=timedelta(minutes=1),
@@ -935,7 +949,7 @@ def _build_dataset_path(self, nombre_tabla: str) -> str:
         return dataset_uris
 
 
-def _should_run_for_dataset(self, dataset_uri: str, **context) -> bool:
+    def _should_run_for_dataset(self, dataset_uri: str, **context) -> bool:
         """
         Decide si un flujo debe ejecutarse según el dataset que disparó el DAG.
 
