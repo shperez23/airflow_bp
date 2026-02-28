@@ -1,5 +1,5 @@
 from pyspark.sql.types import StructType, StructField, StringType
-from pyspark.sql.functions import current_timestamp
+from pyspark.sql.functions import current_timestamp, lit
 import pysftp
 import boto3
 import uuid
@@ -64,6 +64,13 @@ def pyspark_transform(spark, df, param_dict):
 
     concurrencia_maxima = int(param_dict.get("max_concurrency", 5))
     usar_hilos = param_dict.get("use_threads", True)
+
+    # =====================================
+    # Readiness Policy Pattern
+    # Parametriza espera para validación de archivos en copia activa
+    # =====================================
+    readiness_wait_seconds = int(param_dict.get("readiness_wait_seconds", 2))
+    readiness_skip_wait_age_seconds = int(param_dict.get("readiness_skip_wait_age_seconds", 30))
 
     tamano_parte_multipart = int(param_dict.get("multipart_chunksize_mb", 64)) * 1024 * 1024
     umbral_multipart = int(param_dict.get("multipart_threshold_mb", 64)) * 1024 * 1024
@@ -131,18 +138,24 @@ def pyspark_transform(spark, df, param_dict):
     processed_signatures = set()
     try:
         processed_df = spark.read.parquet(CHECKPOINT)
-        processed_hashes = set(r.hash for r in processed_df.select("hash").collect())
+        checkpoint_cols = set(processed_df.columns)
 
-        if {"relative_path", "remote_size", "remote_mtime"}.issubset(set(processed_df.columns)):
-            signatures_df = processed_df.select("relative_path", "remote_size", "remote_mtime")
-            processed_signatures = set(
-                (r.relative_path, int(r.remote_size), int(r.remote_mtime))
-                for r in signatures_df.collect()
-            )
+        if "remote_size" not in checkpoint_cols:
+            processed_df = processed_df.withColumn("remote_size", lit(None).cast("long"))
+        if "remote_mtime" not in checkpoint_cols:
+            processed_df = processed_df.withColumn("remote_mtime", lit(None).cast("long"))
+
+        checkpoint_rows = processed_df.select("hash", "relative_path", "remote_size", "remote_mtime").collect()
+        for row in checkpoint_rows:
+            if row.hash:
+                processed_hashes.add(row.hash)
+            if row.relative_path is not None and row.remote_size is not None and row.remote_mtime is not None:
+                processed_signatures.add((row.relative_path, int(row.remote_size), int(row.remote_mtime)))
     except Exception:
         pass
 
     resultados = []
+    checkpoint_records = []
 
     # =====================================
     # External Connector Pattern (SFTP)
@@ -180,8 +193,12 @@ def pyspark_transform(spark, df, param_dict):
                     resultados.append((remoto, "", "SKIPPED_ALREADY_PROCESSED"))
                     continue
 
-                time.sleep(2)
-                size2 = sftp.stat(remoto).st_size
+                file_age_seconds = int(time.time()) - int(mtime1)
+                if file_age_seconds < readiness_skip_wait_age_seconds:
+                    time.sleep(readiness_wait_seconds)
+                    size2 = sftp.stat(remoto).st_size
+                else:
+                    size2 = size1
 
                 if size1 != size2 or size1 == 0:
                     continue
@@ -238,15 +255,10 @@ def pyspark_transform(spark, df, param_dict):
                 # Metadata Decorator Pattern
                 # Añade metadata de ingestión para lineage y auditoría
                 # =====================================
-                data = [(rel_path, hash_value, s3_key, int(size1), int(mtime1))]
-                meta = spark.createDataFrame(data, ["relative_path", "hash", "s3_key", "remote_size", "remote_mtime"]) \
-                            .withColumn("ingestion_ts", current_timestamp())
+                checkpoint_records.append((rel_path, hash_value, s3_key, int(size1), int(mtime1)))
 
-                # =====================================
-                # Checkpointer Pattern
-                # Persiste el estado para garantizar replay seguro
-                # =====================================
-                meta.write.mode("append").parquet(CHECKPOINT)
+                processed_hashes.add(hash_value)
+                processed_signatures.add(signature)
 
                 processed_hashes.add(hash_value)
                 processed_signatures.add(signature)
@@ -266,6 +278,17 @@ def pyspark_transform(spark, df, param_dict):
                     os.remove(tmp_file)
 
                 resultados.append((remoto, "", f"ERROR:{str(e)}"))
+
+    # =====================================
+    # Batched Checkpointer Pattern
+    # Persiste el estado en lote para reducir small-files y latencia
+    # =====================================
+    if checkpoint_records:
+        meta = spark.createDataFrame(
+            checkpoint_records,
+            ["relative_path", "hash", "s3_key", "remote_size", "remote_mtime"]
+        ).withColumn("ingestion_ts", current_timestamp())
+        meta.write.mode("append").parquet(CHECKPOINT)
 
     # =====================================
     # Process Result Dataset Pattern
