@@ -137,23 +137,50 @@ def pyspark_transform(spark, df, param_dict):
             return spark.read.parquet(path)
 
         if ext == "excel":
-            reader = spark.read.format("com.crealytics.spark.excel")
 
             # =====================================
             # Excel Options Compatibility Pattern
-            # Tolera variantes de opciones (useHeader/header) para evitar fallos de configuración
+            # Normaliza claves en variantes comunes (case-insensitive)
             # =====================================
-            excel_opts = dict(opts)
-            if "header" not in excel_opts and "useHeader" in excel_opts:
-                excel_opts["header"] = excel_opts["useHeader"]
+            excel_opts = {}
+            for k, v in dict(opts).items():
+                key = str(k)
+                normalized = key.strip().lower()
 
-            # Header es obligatorio en algunas versiones del reader de Excel
+                if normalized in {"useheader", "header"}:
+                    excel_opts["header"] = v
+                elif normalized in {"inferschema", "infer_schema"}:
+                    excel_opts["inferSchema"] = v
+                elif normalized in {"sheetname", "sheet_name"}:
+                    excel_opts["sheetName"] = v
+                else:
+                    excel_opts[key] = v
+
+            # Valores por defecto robustos para evitar inferencia pesada en Excel grandes
             if "header" not in excel_opts:
                 excel_opts["header"] = "true"
+            if "inferSchema" not in excel_opts:
+                excel_opts["inferSchema"] = "false"
 
-            for k, v in excel_opts.items():
-                reader = reader.option(k, v)
-            return reader.load(path)
+            def excel_reader_with(options_dict):
+                reader = spark.read.format("com.crealytics.spark.excel")
+                for k, v in options_dict.items():
+                    reader = reader.option(k, v)
+                return reader
+
+            try:
+                return excel_reader_with(excel_opts).load(path)
+            except Exception as exc:
+                # =====================================
+                # Fallback Reader Pattern
+                # Si falla por inferencia de esquema, reintenta sin inferSchema
+                # =====================================
+                excel_opts_retry = dict(excel_opts)
+                excel_opts_retry["inferSchema"] = "false"
+                try:
+                    return excel_reader_with(excel_opts_retry).load(path)
+                except Exception:
+                    raise exc
 
         return None
 
