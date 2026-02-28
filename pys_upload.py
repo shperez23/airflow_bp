@@ -8,6 +8,7 @@ import time
 import gzip
 import shutil
 import hashlib
+from datetime import datetime, timedelta
 from stat import S_ISDIR
 from boto3.s3.transfer import TransferConfig
 
@@ -40,6 +41,34 @@ def pyspark_transform(spark, df, param_dict):
             return False
         return default
 
+    def build_expected_filenames(nombre_archivo, fecha_desde, fecha_hasta):
+        default_date = "YYYY-MM-DD"
+
+        if fecha_desde == default_date and fecha_hasta == default_date:
+            return {nombre_archivo}
+
+        if fecha_desde == default_date or fecha_hasta == default_date:
+            raise ValueError("'fecha_desde' y 'fecha_hasta' deben venir ambas con fecha real o ambas con valor por defecto 'YYYY-MM-DD'")
+
+        try:
+            start_date = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
+            end_date = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValueError("Formato inválido para fechas. Use 'YYYY-MM-DD'") from exc
+
+        if start_date > end_date:
+            raise ValueError("'fecha_desde' no puede ser mayor que 'fecha_hasta'")
+
+        stem, extension = os.path.splitext(nombre_archivo)
+        total_days = (end_date - start_date).days
+
+        filenames = set()
+        for day_offset in range(total_days + 1):
+            current = start_date + timedelta(days=day_offset)
+            filenames.add(f"{stem}_{current.strftime('%Y%m%d')}{extension}")
+
+        return filenames
+
     # =====================================
     # External Trigger
     # Define los parámetros de ejecución enviados por el orquestador
@@ -47,11 +76,16 @@ def pyspark_transform(spark, df, param_dict):
     host = param_dict.get("sftp_host")
     port = get_int_param("sftp_port", 22)
     vault = param_dict.get("sftp_vault_name")
+    nombre_archivo = param_dict.get("nombre_archivo")
+    fecha_desde = param_dict.get("fecha_desde", "YYYY-MM-DD")
+    fecha_hasta = param_dict.get("fecha_hasta", "YYYY-MM-DD")
 
     if not host:
         raise ValueError("Falta parámetro requerido 'sftp_host'")
     if not vault:
         raise ValueError("Falta parámetro requerido 'sftp_vault_name'")
+    if not nombre_archivo:
+        raise ValueError("Falta parámetro requerido 'nombre_archivo'")
 
     # =====================================
     # Secrets Pointer Pattern
@@ -86,6 +120,12 @@ def pyspark_transform(spark, df, param_dict):
         raise ValueError("Falta parámetro requerido 'base_s3'")
     if not base_control_s3:
         raise ValueError("Falta parámetro requerido 'base_control_s3'")
+
+    # =====================================
+    # Naming Strategy Pattern
+    # Construye los nombres esperados según ventana de fechas diaria
+    # =====================================
+    expected_filenames = build_expected_filenames(nombre_archivo, fecha_desde, fecha_hasta)
 
     secret_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.secret.key", None)
     access_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.access.key", None)
@@ -211,7 +251,15 @@ def pyspark_transform(spark, df, param_dict):
             # Evita sobrescrituras y mantiene trazabilidad del origen
             # =====================================
             rel_path = remoto[len(sftp_root):].lstrip("/")
+            remote_filename = os.path.basename(remoto)
             tmp_file = f"/tmp/{uuid.uuid4().hex}"
+
+            # =====================================
+            # Filename Filter Pattern
+            # Procesa únicamente archivos esperados por estrategia de nombres
+            # =====================================
+            if remote_filename not in expected_filenames:
+                continue
 
             try:
 
