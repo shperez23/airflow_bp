@@ -8,6 +8,7 @@ import time
 import gzip
 import shutil
 import hashlib
+from stat import S_ISDIR
 from boto3.s3.transfer import TransferConfig
 
 def pyspark_transform(spark, df, param_dict):
@@ -106,26 +107,40 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     def list_files_recursive(sftp, path):
         files = []
-        for name in sftp.listdir(path):
-            full = path.rstrip("/") + "/" + name
+        pending_dirs = [path]
+
+        while pending_dirs:
+            current_dir = pending_dirs.pop()
             try:
-                if sftp.isdir(full):
-                    files.extend(list_files_recursive(sftp, full))
-                else:
-                    files.append(full)
-            except:
+                for entry in sftp.listdir_attr(current_dir):
+                    full = current_dir.rstrip("/") + "/" + entry.filename
+                    if S_ISDIR(entry.st_mode):
+                        pending_dirs.append(full)
+                    else:
+                        files.append(full)
+            except Exception:
                 continue
+
         return files
 
     # =====================================
     # Checkpointer + Idempotency Pattern
     # Recupera el historial de procesamiento para ingestión incremental
     # =====================================
+    processed_hashes = set()
+    processed_signatures = set()
     try:
-        processed_df = spark.read.parquet(CHECKPOINT).select("hash")
-        processed_hashes = set(r.hash for r in processed_df.collect())
-    except:
-        processed_hashes = set()
+        processed_df = spark.read.parquet(CHECKPOINT)
+        processed_hashes = set(r.hash for r in processed_df.select("hash").collect())
+
+        if {"relative_path", "remote_size", "remote_mtime"}.issubset(set(processed_df.columns)):
+            signatures_df = processed_df.select("relative_path", "remote_size", "remote_mtime")
+            processed_signatures = set(
+                (r.relative_path, int(r.remote_size), int(r.remote_mtime))
+                for r in signatures_df.collect()
+            )
+    except Exception:
+        pass
 
     resultados = []
 
@@ -144,7 +159,6 @@ def pyspark_transform(spark, df, param_dict):
             # Evita sobrescrituras y mantiene trazabilidad del origen
             # =====================================
             rel_path = remoto[len(sftp_root):].lstrip("/")
-            filename = os.path.basename(remoto)
             tmp_file = f"/tmp/{uuid.uuid4().hex}"
 
             try:
@@ -153,7 +167,19 @@ def pyspark_transform(spark, df, param_dict):
                 # Readiness Marker Pattern
                 # Evita ingerir archivos mientras aún se están copiando
                 # =====================================
-                size1 = sftp.stat(remoto).st_size
+                stat1 = sftp.stat(remoto)
+                size1 = stat1.st_size
+                mtime1 = int(stat1.st_mtime)
+
+                # =====================================
+                # Fast Metadata Checkpoint Pattern
+                # Salta archivos ya procesados sin descargarlos nuevamente
+                # =====================================
+                signature = (rel_path, int(size1), int(mtime1))
+                if signature in processed_signatures:
+                    resultados.append((remoto, "", "SKIPPED_ALREADY_PROCESSED"))
+                    continue
+
                 time.sleep(2)
                 size2 = sftp.stat(remoto).st_size
 
@@ -212,8 +238,8 @@ def pyspark_transform(spark, df, param_dict):
                 # Metadata Decorator Pattern
                 # Añade metadata de ingestión para lineage y auditoría
                 # =====================================
-                data = [(rel_path, hash_value, s3_key)]
-                meta = spark.createDataFrame(data, ["relative_path", "hash", "s3_key"]) \
+                data = [(rel_path, hash_value, s3_key, int(size1), int(mtime1))]
+                meta = spark.createDataFrame(data, ["relative_path", "hash", "s3_key", "remote_size", "remote_mtime"]) \
                             .withColumn("ingestion_ts", current_timestamp())
 
                 # =====================================
@@ -221,6 +247,9 @@ def pyspark_transform(spark, df, param_dict):
                 # Persiste el estado para garantizar replay seguro
                 # =====================================
                 meta.write.mode("append").parquet(CHECKPOINT)
+
+                processed_hashes.add(hash_value)
+                processed_signatures.add(signature)
 
                 resultados.append((remoto, s3_key, "PROCESADO"))
 
