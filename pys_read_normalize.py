@@ -138,7 +138,20 @@ def pyspark_transform(spark, df, param_dict):
 
         if ext == "excel":
             reader = spark.read.format("com.crealytics.spark.excel")
-            for k, v in opts.items():
+
+            # =====================================
+            # Excel Options Compatibility Pattern
+            # Tolera variantes de opciones (useHeader/header) para evitar fallos de configuración
+            # =====================================
+            excel_opts = dict(opts)
+            if "header" not in excel_opts and "useHeader" in excel_opts:
+                excel_opts["header"] = excel_opts["useHeader"]
+
+            # Header es obligatorio en algunas versiones del reader de Excel
+            if "header" not in excel_opts:
+                excel_opts["header"] = "true"
+
+            for k, v in excel_opts.items():
                 reader = reader.option(k, v)
             return reader.load(path)
 
