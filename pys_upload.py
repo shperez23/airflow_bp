@@ -260,6 +260,9 @@ def pyspark_transform(spark, df, param_dict):
                 processed_hashes.add(hash_value)
                 processed_signatures.add(signature)
 
+                processed_hashes.add(hash_value)
+                processed_signatures.add(signature)
+
                 resultados.append((remoto, s3_key, "PROCESADO"))
 
                 os.remove(tmp_file)
