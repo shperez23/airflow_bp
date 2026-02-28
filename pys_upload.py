@@ -14,12 +14,44 @@ from boto3.s3.transfer import TransferConfig
 def pyspark_transform(spark, df, param_dict):
 
     # =====================================
+    # Parameter Guard Pattern
+    # Normaliza parámetros opcionales para evitar errores por None/vacío
+    # =====================================
+    def get_int_param(name, default):
+        raw_value = param_dict.get(name, default)
+        if raw_value is None or raw_value == "":
+            return default
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return default
+
+    def get_bool_param(name, default):
+        raw_value = param_dict.get(name, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if raw_value is None or raw_value == "":
+            return default
+
+        normalized = str(raw_value).strip().lower()
+        if normalized in {"true", "1", "yes", "y", "si", "sí"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+        return default
+
+    # =====================================
     # External Trigger
     # Define los parámetros de ejecución enviados por el orquestador
     # =====================================
-    host = param_dict["sftp_host"]
-    port = int(param_dict["sftp_port"])
-    vault = param_dict["sftp_vault_name"]
+    host = param_dict.get("sftp_host")
+    port = get_int_param("sftp_port", 22)
+    vault = param_dict.get("sftp_vault_name")
+
+    if not host:
+        raise ValueError("Falta parámetro requerido 'sftp_host'")
+    if not vault:
+        raise ValueError("Falta parámetro requerido 'sftp_vault_name'")
 
     # =====================================
     # Secrets Pointer Pattern
@@ -44,9 +76,16 @@ def pyspark_transform(spark, df, param_dict):
     # Dataset Routing Pattern
     # Define dinámicamente el destino del dataset en el data lake
     # =====================================
-    bucket_name = param_dict["bucket"]
-    base_s3 = param_dict["base_s3"]
-    base_control_s3 = param_dict["base_control_s3"]
+    bucket_name = param_dict.get("bucket")
+    base_s3 = param_dict.get("base_s3")
+    base_control_s3 = param_dict.get("base_control_s3")
+
+    if not bucket_name:
+        raise ValueError("Falta parámetro requerido 'bucket'")
+    if not base_s3:
+        raise ValueError("Falta parámetro requerido 'base_s3'")
+    if not base_control_s3:
+        raise ValueError("Falta parámetro requerido 'base_control_s3'")
 
     secret_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.secret.key", None)
     access_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.access.key", None)
@@ -62,18 +101,18 @@ def pyspark_transform(spark, df, param_dict):
     # Parametriza performance del upload S3
     # =====================================
 
-    concurrencia_maxima = int(param_dict.get("max_concurrency", 5))
-    usar_hilos = param_dict.get("use_threads", True)
+    concurrencia_maxima = get_int_param("max_concurrency", 5)
+    usar_hilos = get_bool_param("use_threads", True)
 
     # =====================================
     # Readiness Policy Pattern
     # Parametriza espera para validación de archivos en copia activa
     # =====================================
-    readiness_wait_seconds = int(param_dict.get("readiness_wait_seconds", 2))
-    readiness_skip_wait_age_seconds = int(param_dict.get("readiness_skip_wait_age_seconds", 30))
+    readiness_wait_seconds = get_int_param("readiness_wait_seconds", 2)
+    readiness_skip_wait_age_seconds = get_int_param("readiness_skip_wait_age_seconds", 30)
 
-    tamano_parte_multipart = int(param_dict.get("multipart_chunksize_mb", 64)) * 1024 * 1024
-    umbral_multipart = int(param_dict.get("multipart_threshold_mb", 64)) * 1024 * 1024
+    tamano_parte_multipart = get_int_param("multipart_chunksize_mb", 64) * 1024 * 1024
+    umbral_multipart = get_int_param("multipart_threshold_mb", 64) * 1024 * 1024
 
     transfer_config = TransferConfig(
         multipart_threshold=umbral_multipart,
@@ -256,9 +295,6 @@ def pyspark_transform(spark, df, param_dict):
                 # Añade metadata de ingestión para lineage y auditoría
                 # =====================================
                 checkpoint_records.append((rel_path, hash_value, s3_key, int(size1), int(mtime1)))
-
-                processed_hashes.add(hash_value)
-                processed_signatures.add(signature)
 
                 processed_hashes.add(hash_value)
                 processed_signatures.add(signature)
