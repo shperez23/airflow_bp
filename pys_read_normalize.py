@@ -1,8 +1,17 @@
 from pyspark.sql.functions import current_timestamp, lit, col
+from pyspark.sql.types import StructType, StructField, StringType
 import uuid
 import json
 
+
 def pyspark_transform(spark, df, param_dict):
+
+    # =====================================
+    # Parameter Guard Pattern
+    # Normaliza parámetros opcionales para evitar errores por null/vacío
+    # =====================================
+    def is_missing(value):
+        return value is None or (isinstance(value, str) and value.strip() == "")
 
     # =====================================
     # External Trigger Pattern
@@ -10,10 +19,40 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     raw_reader = param_dict.get("reader_options", {})
 
-    if isinstance(raw_reader,str):
-        reader_options = json.loads(raw_reader)
-    else:
+    if isinstance(raw_reader, str):
+        raw_reader = raw_reader.strip()
+        if raw_reader == "":
+            reader_options = {}
+        else:
+            try:
+                reader_options = json.loads(raw_reader)
+            except json.JSONDecodeError as exc:
+                raise ValueError("Parámetro 'reader_options' no es un JSON válido") from exc
+    elif isinstance(raw_reader, dict):
         reader_options = raw_reader
+    else:
+        raise ValueError("Parámetro 'reader_options' debe ser dict o JSON string")
+
+    # =====================================
+    # Input Contract Resolver Pattern
+    # Acepta distintos contratos de entrada para mantener compatibilidad
+    # =====================================
+    input_cols = set(df.columns)
+    if "path" in input_cols:
+        files_df = df.select("path")
+    elif {"s3_key", "status"}.issubset(input_cols):
+        bucket_raw = param_dict.get("bucket_raw") or param_dict.get("bucket")
+        if is_missing(bucket_raw):
+            raise ValueError("Falta parámetro requerido 'bucket_raw' (o 'bucket') para resolver s3_key")
+        files_df = (
+            df
+            .where((df.status == "PROCESADO") & (df.s3_key.isNotNull()) & (df.s3_key != ""))
+            .selectExpr(f"concat('s3a://{bucket_raw}/', s3_key) as path")
+        )
+    else:
+        raise ValueError("El input de pys_read_normalize debe incluir columna 'path' o contrato con 's3_key'/'status'")
+
+    files = [r.path for r in files_df.distinct().collect() if not is_missing(r.path)]
 
     # =====================================
     # Dynamic Reader Pattern (helper)
@@ -21,6 +60,15 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     def get_ext(path):
         p = path.lower()
+
+        # Compression Resolver Pattern
+        # Soporta archivos comprimidos (.gz, .gzip, .bz2, .zip) conservando tipo lógico
+        compression_suffixes = (".gz", ".gzip", ".bz2", ".zip")
+        for suffix in compression_suffixes:
+            if p.endswith(suffix):
+                p = p[: -len(suffix)]
+                break
+
         if p.endswith((".xlsx", ".xls")):
             return "excel"
         if p.endswith(".csv"):
@@ -38,9 +86,9 @@ def pyspark_transform(spark, df, param_dict):
     # Agrupa por dataset lógico para controlar unions y escrituras downstream
     # =====================================
     def dataset_name(path):
-        # Dataset basado en nombre de archivo (prefijo antes de _)
         filename = path.split("/")[-1]
-        return filename.split("_")[0] if "_" in filename else filename
+        stem = filename.split(".")[0]
+        return stem.split("_")[0] if "_" in stem else stem
 
     # =====================================
     # Schema Normalizer Pattern (helper)
@@ -54,13 +102,13 @@ def pyspark_transform(spark, df, param_dict):
     # Aplica opciones de lectura por tipo (csv/txt/json/parquet/excel) desde param_dict
     # =====================================
     def read_dynamic(path):
-       
+
         ext = get_ext(path)
 
         if ext not in reader_options:
             return None
 
-        opts = reader_options.get(ext, {})
+        opts = reader_options.get(ext, {}) or {}
 
         if ext == "csv":
             reader = spark.read
@@ -77,8 +125,7 @@ def pyspark_transform(spark, df, param_dict):
 
             if delimiter:
                 return reader.option("delimiter", delimiter).csv(path)
-            else:
-                return reader.text(path)
+            return reader.text(path)
 
         if ext == "json":
             reader = spark.read
@@ -90,19 +137,52 @@ def pyspark_transform(spark, df, param_dict):
             return spark.read.parquet(path)
 
         if ext == "excel":
-            reader = spark.read.format("com.crealytics.spark.excel")
-            for k, v in opts.items():
-                reader = reader.option(k, v)
-            return reader.load(path)
+
+            # =====================================
+            # Excel Options Compatibility Pattern
+            # Normaliza claves en variantes comunes (case-insensitive)
+            # =====================================
+            excel_opts = {}
+            for k, v in dict(opts).items():
+                key = str(k)
+                normalized = key.strip().lower()
+
+                if normalized in {"useheader", "header"}:
+                    excel_opts["header"] = v
+                elif normalized in {"inferschema", "infer_schema"}:
+                    excel_opts["inferSchema"] = v
+                elif normalized in {"sheetname", "sheet_name"}:
+                    excel_opts["sheetName"] = v
+                else:
+                    excel_opts[key] = v
+
+            # Valores por defecto robustos para evitar inferencia pesada en Excel grandes
+            if "header" not in excel_opts:
+                excel_opts["header"] = "true"
+            if "inferSchema" not in excel_opts:
+                excel_opts["inferSchema"] = "false"
+
+            def excel_reader_with(options_dict):
+                reader = spark.read.format("com.crealytics.spark.excel")
+                for k, v in options_dict.items():
+                    reader = reader.option(k, v)
+                return reader
+
+            try:
+                return excel_reader_with(excel_opts).load(path)
+            except Exception as exc:
+                # =====================================
+                # Fallback Reader Pattern
+                # Si falla por inferencia de esquema, reintenta sin inferSchema
+                # =====================================
+                excel_opts_retry = dict(excel_opts)
+                excel_opts_retry["inferSchema"] = "false"
+                try:
+                    return excel_reader_with(excel_opts_retry).load(path)
+                except Exception:
+                    raise exc
 
         return None
-
-
-    # =====================================
-    # Dataset Discovery Pattern
-    # Consume el listado de archivos de entrada (df del nodo DISCOVERY)
-    # =====================================
-    files = [r.path for r in df.select("path").collect()]
 
     # =====================================
     # Dataset Union Pattern
@@ -122,11 +202,13 @@ def pyspark_transform(spark, df, param_dict):
         # Metadata Decorator Pattern
         # Agrega columnas de trazabilidad (lineage + auditoría)
         # =====================================
+        batch_id = str(uuid.uuid4())
         df_read = (
             df_read
             .withColumn("ingestion_ts", current_timestamp())
             .withColumn("source_file", lit(file))
-            .withColumn("batch_id", lit(str(uuid.uuid4())))
+            .withColumn("path", lit(file))
+            .withColumn("batch_id", lit(batch_id))
             .withColumn("dataset", lit(dset))
         )
 
@@ -140,6 +222,20 @@ def pyspark_transform(spark, df, param_dict):
             datasets[dset] = df_read
         else:
             datasets[dset] = datasets[dset].unionByName(df_read, allowMissingColumns=True)
+
+    # =====================================
+    # Empty Result Guard Pattern
+    # Retorna un DataFrame vacío tipado cuando no hay archivos legibles
+    # =====================================
+    if not datasets:
+        empty_schema = StructType([
+            StructField("ingestion_ts", StringType(), True),
+            StructField("source_file", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("batch_id", StringType(), True),
+            StructField("dataset", StringType(), True),
+        ])
+        return spark.createDataFrame([], empty_schema)
 
     # =====================================
     # Process Result Dataset Pattern
