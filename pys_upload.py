@@ -1,5 +1,5 @@
 from pyspark.sql.types import StructType, StructField, StringType
-from pyspark.sql.functions import current_timestamp
+from pyspark.sql.functions import current_timestamp, lit
 import pysftp
 import boto3
 import uuid
@@ -8,17 +8,84 @@ import time
 import gzip
 import shutil
 import hashlib
+from datetime import datetime, timedelta
+from stat import S_ISDIR
 from boto3.s3.transfer import TransferConfig
 
 def pyspark_transform(spark, df, param_dict):
 
     # =====================================
+    # Parameter Guard Pattern
+    # Normaliza parámetros opcionales para evitar errores por None/vacío
+    # =====================================
+    def get_int_param(name, default):
+        raw_value = param_dict.get(name, default)
+        if raw_value is None or raw_value == "":
+            return default
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return default
+
+    def get_bool_param(name, default):
+        raw_value = param_dict.get(name, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if raw_value is None or raw_value == "":
+            return default
+
+        normalized = str(raw_value).strip().lower()
+        if normalized in {"true", "1", "yes", "y", "si", "sí"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+        return default
+
+    def build_expected_filenames(nombre_archivo, fecha_desde, fecha_hasta):
+        default_date = "YYYY-MM-DD"
+
+        if fecha_desde == default_date and fecha_hasta == default_date:
+            return {nombre_archivo}
+
+        if fecha_desde == default_date or fecha_hasta == default_date:
+            raise ValueError("'fecha_desde' y 'fecha_hasta' deben venir ambas con fecha real o ambas con valor por defecto 'YYYY-MM-DD'")
+
+        try:
+            start_date = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
+            end_date = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValueError("Formato inválido para fechas. Use 'YYYY-MM-DD'") from exc
+
+        if start_date > end_date:
+            raise ValueError("'fecha_desde' no puede ser mayor que 'fecha_hasta'")
+
+        stem, extension = os.path.splitext(nombre_archivo)
+        total_days = (end_date - start_date).days
+
+        filenames = set()
+        for day_offset in range(total_days + 1):
+            current = start_date + timedelta(days=day_offset)
+            filenames.add(f"{stem}_{current.strftime('%Y%m%d')}{extension}")
+
+        return filenames
+
+    # =====================================
     # External Trigger
     # Define los parámetros de ejecución enviados por el orquestador
     # =====================================
-    host = param_dict["sftp_host"]
-    port = int(param_dict["sftp_port"])
-    vault = param_dict["sftp_vault_name"]
+    host = param_dict.get("sftp_host")
+    port = get_int_param("sftp_port", 22)
+    vault = param_dict.get("sftp_vault_name")
+    nombre_archivo = param_dict.get("nombre_archivo")
+    fecha_desde = param_dict.get("fecha_desde", "YYYY-MM-DD")
+    fecha_hasta = param_dict.get("fecha_hasta", "YYYY-MM-DD")
+
+    if not host:
+        raise ValueError("Falta parámetro requerido 'sftp_host'")
+    if not vault:
+        raise ValueError("Falta parámetro requerido 'sftp_vault_name'")
+    if not nombre_archivo:
+        raise ValueError("Falta parámetro requerido 'nombre_archivo'")
 
     # =====================================
     # Secrets Pointer Pattern
@@ -43,9 +110,22 @@ def pyspark_transform(spark, df, param_dict):
     # Dataset Routing Pattern
     # Define dinámicamente el destino del dataset en el data lake
     # =====================================
-    bucket_name = param_dict["bucket"]
-    base_s3 = param_dict["base_s3"]
-    base_control_s3 = param_dict["base_control_s3"]
+    bucket_name = param_dict.get("bucket")
+    base_s3 = param_dict.get("base_s3")
+    base_control_s3 = param_dict.get("base_control_s3")
+
+    if not bucket_name:
+        raise ValueError("Falta parámetro requerido 'bucket'")
+    if not base_s3:
+        raise ValueError("Falta parámetro requerido 'base_s3'")
+    if not base_control_s3:
+        raise ValueError("Falta parámetro requerido 'base_control_s3'")
+
+    # =====================================
+    # Naming Strategy Pattern
+    # Construye los nombres esperados según ventana de fechas diaria
+    # =====================================
+    expected_filenames = build_expected_filenames(nombre_archivo, fecha_desde, fecha_hasta)
 
     secret_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.secret.key", None)
     access_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.access.key", None)
@@ -61,11 +141,18 @@ def pyspark_transform(spark, df, param_dict):
     # Parametriza performance del upload S3
     # =====================================
 
-    concurrencia_maxima = int(param_dict.get("max_concurrency", 5))
-    usar_hilos = param_dict.get("use_threads", True)
+    concurrencia_maxima = get_int_param("max_concurrency", 5)
+    usar_hilos = get_bool_param("use_threads", True)
 
-    tamano_parte_multipart = int(param_dict.get("multipart_chunksize_mb", 64)) * 1024 * 1024
-    umbral_multipart = int(param_dict.get("multipart_threshold_mb", 64)) * 1024 * 1024
+    # =====================================
+    # Readiness Policy Pattern
+    # Parametriza espera para validación de archivos en copia activa
+    # =====================================
+    readiness_wait_seconds = get_int_param("readiness_wait_seconds", 2)
+    readiness_skip_wait_age_seconds = get_int_param("readiness_skip_wait_age_seconds", 30)
+
+    tamano_parte_multipart = get_int_param("multipart_chunksize_mb", 64) * 1024 * 1024
+    umbral_multipart = get_int_param("multipart_threshold_mb", 64) * 1024 * 1024
 
     transfer_config = TransferConfig(
         multipart_threshold=umbral_multipart,
@@ -106,28 +193,48 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     def list_files_recursive(sftp, path):
         files = []
-        for name in sftp.listdir(path):
-            full = path.rstrip("/") + "/" + name
+        pending_dirs = [path]
+
+        while pending_dirs:
+            current_dir = pending_dirs.pop()
             try:
-                if sftp.isdir(full):
-                    files.extend(list_files_recursive(sftp, full))
-                else:
-                    files.append(full)
-            except:
+                for entry in sftp.listdir_attr(current_dir):
+                    full = current_dir.rstrip("/") + "/" + entry.filename
+                    if S_ISDIR(entry.st_mode):
+                        pending_dirs.append(full)
+                    else:
+                        files.append(full)
+            except Exception:
                 continue
+
         return files
 
     # =====================================
     # Checkpointer + Idempotency Pattern
     # Recupera el historial de procesamiento para ingestión incremental
     # =====================================
+    processed_hashes = set()
+    processed_signatures = set()
     try:
-        processed_df = spark.read.parquet(CHECKPOINT).select("hash")
-        processed_hashes = set(r.hash for r in processed_df.collect())
-    except:
-        processed_hashes = set()
+        processed_df = spark.read.parquet(CHECKPOINT)
+        checkpoint_cols = set(processed_df.columns)
+
+        if "remote_size" not in checkpoint_cols:
+            processed_df = processed_df.withColumn("remote_size", lit(None).cast("long"))
+        if "remote_mtime" not in checkpoint_cols:
+            processed_df = processed_df.withColumn("remote_mtime", lit(None).cast("long"))
+
+        checkpoint_rows = processed_df.select("hash", "relative_path", "remote_size", "remote_mtime").collect()
+        for row in checkpoint_rows:
+            if row.hash:
+                processed_hashes.add(row.hash)
+            if row.relative_path is not None and row.remote_size is not None and row.remote_mtime is not None:
+                processed_signatures.add((row.relative_path, int(row.remote_size), int(row.remote_mtime)))
+    except Exception:
+        pass
 
     resultados = []
+    checkpoint_records = []
 
     # =====================================
     # External Connector Pattern (SFTP)
@@ -144,8 +251,15 @@ def pyspark_transform(spark, df, param_dict):
             # Evita sobrescrituras y mantiene trazabilidad del origen
             # =====================================
             rel_path = remoto[len(sftp_root):].lstrip("/")
-            filename = os.path.basename(remoto)
+            remote_filename = os.path.basename(remoto)
             tmp_file = f"/tmp/{uuid.uuid4().hex}"
+
+            # =====================================
+            # Filename Filter Pattern
+            # Procesa únicamente archivos esperados por estrategia de nombres
+            # =====================================
+            if remote_filename not in expected_filenames:
+                continue
 
             try:
 
@@ -153,9 +267,25 @@ def pyspark_transform(spark, df, param_dict):
                 # Readiness Marker Pattern
                 # Evita ingerir archivos mientras aún se están copiando
                 # =====================================
-                size1 = sftp.stat(remoto).st_size
-                time.sleep(2)
-                size2 = sftp.stat(remoto).st_size
+                stat1 = sftp.stat(remoto)
+                size1 = stat1.st_size
+                mtime1 = int(stat1.st_mtime)
+
+                # =====================================
+                # Fast Metadata Checkpoint Pattern
+                # Salta archivos ya procesados sin descargarlos nuevamente
+                # =====================================
+                signature = (rel_path, int(size1), int(mtime1))
+                if signature in processed_signatures:
+                    resultados.append((remoto, "", "SKIPPED_ALREADY_PROCESSED"))
+                    continue
+
+                file_age_seconds = int(time.time()) - int(mtime1)
+                if file_age_seconds < readiness_skip_wait_age_seconds:
+                    time.sleep(readiness_wait_seconds)
+                    size2 = sftp.stat(remoto).st_size
+                else:
+                    size2 = size1
 
                 if size1 != size2 or size1 == 0:
                     continue
@@ -212,15 +342,10 @@ def pyspark_transform(spark, df, param_dict):
                 # Metadata Decorator Pattern
                 # Añade metadata de ingestión para lineage y auditoría
                 # =====================================
-                data = [(rel_path, hash_value, s3_key)]
-                meta = spark.createDataFrame(data, ["relative_path", "hash", "s3_key"]) \
-                            .withColumn("ingestion_ts", current_timestamp())
+                checkpoint_records.append((rel_path, hash_value, s3_key, int(size1), int(mtime1)))
 
-                # =====================================
-                # Checkpointer Pattern
-                # Persiste el estado para garantizar replay seguro
-                # =====================================
-                meta.write.mode("append").parquet(CHECKPOINT)
+                processed_hashes.add(hash_value)
+                processed_signatures.add(signature)
 
                 resultados.append((remoto, s3_key, "PROCESADO"))
 
@@ -237,6 +362,17 @@ def pyspark_transform(spark, df, param_dict):
                     os.remove(tmp_file)
 
                 resultados.append((remoto, "", f"ERROR:{str(e)}"))
+
+    # =====================================
+    # Batched Checkpointer Pattern
+    # Persiste el estado en lote para reducir small-files y latencia
+    # =====================================
+    if checkpoint_records:
+        meta = spark.createDataFrame(
+            checkpoint_records,
+            ["relative_path", "hash", "s3_key", "remote_size", "remote_mtime"]
+        ).withColumn("ingestion_ts", current_timestamp())
+        meta.write.mode("append").parquet(CHECKPOINT)
 
     # =====================================
     # Process Result Dataset Pattern
