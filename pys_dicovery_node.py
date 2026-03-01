@@ -22,6 +22,7 @@ def pyspark_transform(spark, df, param_dict):
         return default
 
     include_upload_errors = get_bool_param("include_upload_errors", True)
+    include_upload_skipped = get_bool_param("include_upload_skipped", False)
 
     # =====================================
     # Upload Result Contract Pattern
@@ -49,19 +50,24 @@ def pyspark_transform(spark, df, param_dict):
             .selectExpr(
                 f"concat('s3a://{bucket_raw}/', s3_key) as path",
                 "'PENDING' as discovery_status",
-                "cast(null as string) as error_message"
+                "cast(null as string) as error_message",
+                f"concat('s3a://{bucket_raw}/', s3_key) as source_file"
             )
             .distinct()
         )
 
         if include_upload_errors:
+            upload_errors_df = df.where((df.status != "PROCESADO") & df.status.rlike("^ERROR"))
+            if include_upload_skipped:
+                upload_errors_df = df.where((df.status != "PROCESADO") & (df.status.rlike("^ERROR") | df.status.rlike("^SKIPPED")))
+
             upload_errors = (
-                df
-                .where(df.status != "PROCESADO")
+                upload_errors_df
                 .selectExpr(
                     "cast(null as string) as path",
                     "status as discovery_status",
-                    "coalesce(error_message, status) as error_message"
+                    "coalesce(error_message, status) as error_message",
+                    "full_path as source_file"
                 )
                 .distinct()
             )
@@ -86,7 +92,7 @@ def pyspark_transform(spark, df, param_dict):
             spark.read
             .format("binaryFile")
             .load(raw_path)
-            .selectExpr("path", "'PENDING' as discovery_status", "cast(null as string) as error_message")
+            .selectExpr("path", "'PENDING' as discovery_status", "cast(null as string) as error_message", "path as source_file")
             .distinct()
         )
         upload_errors = None

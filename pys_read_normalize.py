@@ -46,7 +46,8 @@ def pyspark_transform(spark, df, param_dict):
         files_df = df.selectExpr(
             "path",
             "coalesce(discovery_status, 'PENDING') as status",
-            "error_message"
+            "error_message",
+            "coalesce(source_file, path) as source_file"
         )
     elif {"s3_key", "status"}.issubset(input_cols):
         bucket_raw = param_dict.get("bucket_raw") or param_dict.get("bucket")
@@ -58,7 +59,8 @@ def pyspark_transform(spark, df, param_dict):
             .selectExpr(
                 f"concat('s3a://{bucket_raw}/', s3_key) as path",
                 "'PENDING' as status",
-                "cast(null as string) as error_message"
+                "cast(null as string) as error_message",
+                f"concat('s3a://{bucket_raw}/', s3_key) as source_file"
             )
         )
     else:
@@ -66,7 +68,10 @@ def pyspark_transform(spark, df, param_dict):
 
     file_rows = files_df.distinct().collect()
     files = [r.path for r in file_rows if not is_missing(r.path) and (r.status == "PENDING")]
-    inherited_errors = [r for r in file_rows if is_missing(r.path) or r.status != "PENDING"]
+    inherited_errors = [
+        r for r in file_rows
+        if (str(r.status).upper().startswith("ERROR")) and (r.status != "PENDING")
+    ]
 
     # =====================================
     # POI Runtime Guard Pattern
@@ -224,14 +229,16 @@ def pyspark_transform(spark, df, param_dict):
     error_records = []
 
     for inherited in inherited_errors:
+        src_file = inherited.source_file if not is_missing(inherited.source_file) else None
+        inferred_dataset = dataset_name(src_file) if src_file else None
         error_records.append((
-            None,
+            src_file,
             "ERROR_UPSTREAM",
             inherited.error_message or inherited.status or "Error heredado desde upstream",
             None,
+            src_file,
             None,
-            None,
-            None,
+            inferred_dataset,
         ))
 
     for file in files:
@@ -246,7 +253,7 @@ def pyspark_transform(spark, df, param_dict):
                 "ERROR_READ",
                 sanitize_error_message(exc),
                 None,
-                None,
+                file,
                 None,
                 dset,
             ))
