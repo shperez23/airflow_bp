@@ -7,6 +7,22 @@ def pyspark_transform(spark, df, param_dict):
     def is_missing(value):
         return value is None or (isinstance(value, str) and value.strip() == "")
 
+    def get_bool_param(name, default):
+        raw_value = param_dict.get(name, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if raw_value is None:
+            return default
+
+        normalized = str(raw_value).strip().lower()
+        if normalized in {"true", "1", "yes", "y", "si", "sí"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+        return default
+
+    include_upload_errors = get_bool_param("include_upload_errors", True)
+
     # =====================================
     # Upload Result Contract Pattern
     # Detecta si el input proviene del nodo pys_upload (columnas de resultado)
@@ -19,14 +35,6 @@ def pyspark_transform(spark, df, param_dict):
     # Construye el set de archivos candidatos según contrato detectado
     # =====================================
     if has_upload_contract:
-        # Toma únicamente archivos procesados exitosamente y con key válida
-        discovered_df = (
-            df
-            .where((df.status == "PROCESADO") & (df.s3_key.isNotNull()) & (df.s3_key != ""))
-            .select("s3_key")
-            .distinct()
-        )
-
         # =====================================
         # Storage URI Resolver Pattern
         # Convierte s3_key de upload a path s3a:// consumible por Spark
@@ -35,9 +43,30 @@ def pyspark_transform(spark, df, param_dict):
         if is_missing(bucket_raw):
             raise ValueError("Falta parámetro requerido 'bucket_raw' (o 'bucket') para resolver paths desde s3_key")
 
-        pending = discovered_df.selectExpr(
-            f"concat('s3a://{bucket_raw}/', s3_key) as path"
+        pending = (
+            df
+            .where((df.status == "PROCESADO") & (df.s3_key.isNotNull()) & (df.s3_key != ""))
+            .selectExpr(
+                f"concat('s3a://{bucket_raw}/', s3_key) as path",
+                "'PENDING' as discovery_status",
+                "cast(null as string) as error_message"
+            )
+            .distinct()
         )
+
+        if include_upload_errors:
+            upload_errors = (
+                df
+                .where(df.status != "PROCESADO")
+                .selectExpr(
+                    "cast(null as string) as path",
+                    "status as discovery_status",
+                    "coalesce(error_message, status) as error_message"
+                )
+                .distinct()
+            )
+        else:
+            upload_errors = None
 
     else:
         # =====================================
@@ -53,7 +82,14 @@ def pyspark_transform(spark, df, param_dict):
             raise ValueError("Falta parámetro requerido 'raw_prefix'")
 
         raw_path = f"s3a://{bucket_raw}/{raw_prefix}"
-        pending = spark.read.format("binaryFile").load(raw_path).select("path")
+        pending = (
+            spark.read
+            .format("binaryFile")
+            .load(raw_path)
+            .selectExpr("path", "'PENDING' as discovery_status", "cast(null as string) as error_message")
+            .distinct()
+        )
+        upload_errors = None
 
     # =====================================
     # Checkpointer Pattern
@@ -71,9 +107,12 @@ def pyspark_transform(spark, df, param_dict):
 
     try:
         processed = spark.read.parquet(checkpoint_path).select("path").distinct()
-        pending = pending.distinct().join(processed, "path", "left_anti")
+        pending = pending.join(processed, "path", "left_anti")
     except Exception:
         pending = pending.distinct()
+
+    if upload_errors is not None:
+        pending = pending.unionByName(upload_errors, allowMissingColumns=True)
 
     # =====================================
     # Process Result Dataset Pattern
