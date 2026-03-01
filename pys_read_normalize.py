@@ -55,6 +55,31 @@ def pyspark_transform(spark, df, param_dict):
     files = [r.path for r in files_df.distinct().collect() if not is_missing(r.path)]
 
     # =====================================
+    # POI Runtime Guard Pattern
+    # Permite subir límites internos de Apache POI cuando el Excel lo requiere
+    # =====================================
+    def apply_poi_runtime_overrides(max_byte_array_size):
+        if is_missing(max_byte_array_size):
+            return
+
+        try:
+            value = int(max_byte_array_size)
+        except (TypeError, ValueError):
+            return
+
+        if value <= 0:
+            return
+
+        try:
+            # Propiedad JVM + override explícito para IOUtils
+            spark._jvm.java.lang.System.setProperty("poi.io.maxByteArraySize", str(value))
+            spark._jvm.org.apache.poi.util.IOUtils.setByteArrayMaxOverride(value)
+        except Exception:
+            # Si el runtime no expone POI en esta ruta, no se bloquea el flujo
+            pass
+
+
+    # =====================================
     # Dynamic Reader Pattern (helper)
     # Selecciona dinámicamente el lector según la extensión del archivo
     # =====================================
@@ -161,6 +186,19 @@ def pyspark_transform(spark, df, param_dict):
                 excel_opts["header"] = "true"
             if "inferSchema" not in excel_opts:
                 excel_opts["inferSchema"] = "false"
+
+            # Configuraciones recomendadas para archivos grandes (streaming reader)
+            if "maxRowsInMemory" not in excel_opts:
+                excel_opts["maxRowsInMemory"] = "1000"
+            if "excerptSize" not in excel_opts:
+                excel_opts["excerptSize"] = "10"
+
+            # Override opcional de límite POI:
+            # 1) param_dict['poi_max_byte_array_size']
+            # 2) reader_options['excel']['poi_max_byte_array_size']
+            poi_max_from_excel_opts = excel_opts.pop("poi_max_byte_array_size", None)
+            poi_max_from_param = param_dict.get("poi_max_byte_array_size")
+            apply_poi_runtime_overrides(poi_max_from_param or poi_max_from_excel_opts)
 
             def excel_reader_with(options_dict):
                 reader = spark.read.format("com.crealytics.spark.excel")
