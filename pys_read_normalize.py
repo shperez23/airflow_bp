@@ -13,6 +13,10 @@ def pyspark_transform(spark, df, param_dict):
     def is_missing(value):
         return value is None or (isinstance(value, str) and value.strip() == "")
 
+    def sanitize_error_message(exc):
+        message = str(exc).strip()
+        return message if message else exc.__class__.__name__
+
     # =====================================
     # External Trigger Pattern
     # Resuelve parámetros de ejecución enviados por el orquestador (Rocket/Airflow)
@@ -39,7 +43,12 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     input_cols = set(df.columns)
     if "path" in input_cols:
-        files_df = df.select("path")
+        files_df = df.selectExpr(
+            "path",
+            "coalesce(discovery_status, 'PENDING') as status",
+            "error_message",
+            "coalesce(source_file, path) as source_file"
+        )
     elif {"s3_key", "status"}.issubset(input_cols):
         bucket_raw = param_dict.get("bucket_raw") or param_dict.get("bucket")
         if is_missing(bucket_raw):
@@ -47,12 +56,22 @@ def pyspark_transform(spark, df, param_dict):
         files_df = (
             df
             .where((df.status == "PROCESADO") & (df.s3_key.isNotNull()) & (df.s3_key != ""))
-            .selectExpr(f"concat('s3a://{bucket_raw}/', s3_key) as path")
+            .selectExpr(
+                f"concat('s3a://{bucket_raw}/', s3_key) as path",
+                "'PENDING' as status",
+                "cast(null as string) as error_message",
+                f"concat('s3a://{bucket_raw}/', s3_key) as source_file"
+            )
         )
     else:
         raise ValueError("El input de pys_read_normalize debe incluir columna 'path' o contrato con 's3_key'/'status'")
 
-    files = [r.path for r in files_df.distinct().collect() if not is_missing(r.path)]
+    file_rows = files_df.distinct().collect()
+    files = [r.path for r in file_rows if not is_missing(r.path) and (r.status == "PENDING")]
+    inherited_errors = [
+        r for r in file_rows
+        if (str(r.status).upper().startswith("ERROR")) and (r.status != "PENDING")
+    ]
 
     # =====================================
     # POI Runtime Guard Pattern
@@ -71,13 +90,10 @@ def pyspark_transform(spark, df, param_dict):
             return
 
         try:
-            # Propiedad JVM + override explícito para IOUtils
             spark._jvm.java.lang.System.setProperty("poi.io.maxByteArraySize", str(value))
             spark._jvm.org.apache.poi.util.IOUtils.setByteArrayMaxOverride(value)
         except Exception:
-            # Si el runtime no expone POI en esta ruta, no se bloquea el flujo
             pass
-
 
     # =====================================
     # Dynamic Reader Pattern (helper)
@@ -86,8 +102,6 @@ def pyspark_transform(spark, df, param_dict):
     def get_ext(path):
         p = path.lower()
 
-        # Compression Resolver Pattern
-        # Soporta archivos comprimidos (.gz, .gzip, .bz2, .zip) conservando tipo lógico
         compression_suffixes = (".gz", ".gzip", ".bz2", ".zip")
         for suffix in compression_suffixes:
             if p.endswith(suffix):
@@ -131,7 +145,7 @@ def pyspark_transform(spark, df, param_dict):
         ext = get_ext(path)
 
         if ext not in reader_options:
-            return None
+            raise ValueError(f"No hay reader_options definidos para extensión '{ext}'")
 
         opts = reader_options.get(ext, {}) or {}
 
@@ -162,11 +176,6 @@ def pyspark_transform(spark, df, param_dict):
             return spark.read.parquet(path)
 
         if ext == "excel":
-
-            # =====================================
-            # Excel Options Compatibility Pattern
-            # Normaliza claves en variantes comunes (case-insensitive)
-            # =====================================
             excel_opts = {}
             for k, v in dict(opts).items():
                 key = str(k)
@@ -181,21 +190,15 @@ def pyspark_transform(spark, df, param_dict):
                 else:
                     excel_opts[key] = v
 
-            # Valores por defecto robustos para evitar inferencia pesada en Excel grandes
             if "header" not in excel_opts:
                 excel_opts["header"] = "true"
             if "inferSchema" not in excel_opts:
                 excel_opts["inferSchema"] = "false"
-
-            # Configuraciones recomendadas para archivos grandes (streaming reader)
             if "maxRowsInMemory" not in excel_opts:
                 excel_opts["maxRowsInMemory"] = "1000"
             if "excerptSize" not in excel_opts:
                 excel_opts["excerptSize"] = "10"
 
-            # Override opcional de límite POI:
-            # 1) param_dict['poi_max_byte_array_size']
-            # 2) reader_options['excel']['poi_max_byte_array_size']
             poi_max_from_excel_opts = excel_opts.pop("poi_max_byte_array_size", None)
             poi_max_from_param = param_dict.get("poi_max_byte_array_size")
             apply_poi_runtime_overrides(poi_max_from_param or poi_max_from_excel_opts)
@@ -209,10 +212,6 @@ def pyspark_transform(spark, df, param_dict):
             try:
                 return excel_reader_with(excel_opts).load(path)
             except Exception as exc:
-                # =====================================
-                # Fallback Reader Pattern
-                # Si falla por inferencia de esquema, reintenta sin inferSchema
-                # =====================================
                 excel_opts_retry = dict(excel_opts)
                 excel_opts_retry["inferSchema"] = "false"
                 try:
@@ -220,26 +219,46 @@ def pyspark_transform(spark, df, param_dict):
                 except Exception:
                     raise exc
 
-        return None
+        raise ValueError(f"Extensión no soportada para lectura dinámica: '{ext}'")
 
     # =====================================
     # Dataset Union Pattern
     # Une archivos del mismo dataset lógico en un DF por dataset
     # =====================================
     datasets = {}
+    error_records = []
+
+    for inherited in inherited_errors:
+        src_file = inherited.source_file if not is_missing(inherited.source_file) else None
+        inferred_dataset = dataset_name(src_file) if src_file else None
+        error_records.append((
+            src_file,
+            "ERROR_UPSTREAM",
+            inherited.error_message or inherited.status or "Error heredado desde upstream",
+            None,
+            src_file,
+            None,
+            inferred_dataset,
+        ))
 
     for file in files:
 
         dset = dataset_name(file)
 
-        df_read = read_dynamic(file)
-        if df_read is None:
+        try:
+            df_read = read_dynamic(file)
+        except Exception as exc:
+            error_records.append((
+                file,
+                "ERROR_READ",
+                sanitize_error_message(exc),
+                None,
+                file,
+                None,
+                dset,
+            ))
             continue
 
-        # =====================================
-        # Metadata Decorator Pattern
-        # Agrega columnas de trazabilidad (lineage + auditoría)
-        # =====================================
         batch_id = str(uuid.uuid4())
         df_read = (
             df_read
@@ -248,12 +267,11 @@ def pyspark_transform(spark, df, param_dict):
             .withColumn("path", lit(file))
             .withColumn("batch_id", lit(batch_id))
             .withColumn("dataset", lit(dset))
+            .withColumn("record_status", lit("PROCESADO"))
+            .withColumn("error_stage", lit(None).cast("string"))
+            .withColumn("error_message", lit(None).cast("string"))
         )
 
-        # =====================================
-        # Schema Normalizer Pattern
-        # Convierte todos los campos del contenido a string para estandarizar
-        # =====================================
         df_read = cast_all_to_string(df_read)
 
         if dset not in datasets:
@@ -261,26 +279,44 @@ def pyspark_transform(spark, df, param_dict):
         else:
             datasets[dset] = datasets[dset].unionByName(df_read, allowMissingColumns=True)
 
-    # =====================================
-    # Empty Result Guard Pattern
-    # Retorna un DataFrame vacío tipado cuando no hay archivos legibles
-    # =====================================
-    if not datasets:
+    if not datasets and not error_records:
         empty_schema = StructType([
             StructField("ingestion_ts", StringType(), True),
             StructField("source_file", StringType(), True),
             StructField("path", StringType(), True),
             StructField("batch_id", StringType(), True),
             StructField("dataset", StringType(), True),
+            StructField("record_status", StringType(), True),
+            StructField("error_stage", StringType(), True),
+            StructField("error_message", StringType(), True),
         ])
         return spark.createDataFrame([], empty_schema)
 
-    # =====================================
-    # Process Result Dataset Pattern
-    # Retorna un único DF unificado para nodos downstream (snapshot/delta/checkpoint)
-    # =====================================
     final_df = None
     for d in datasets.values():
         final_df = d if final_df is None else final_df.unionByName(d, allowMissingColumns=True)
+
+    if error_records:
+        error_schema = StructType([
+            StructField("path", StringType(), True),
+            StructField("record_status", StringType(), True),
+            StructField("error_message", StringType(), True),
+            StructField("ingestion_ts", StringType(), True),
+            StructField("source_file", StringType(), True),
+            StructField("batch_id", StringType(), True),
+            StructField("dataset", StringType(), True),
+        ])
+
+        error_df = spark.createDataFrame(error_records, error_schema)
+        error_df = (
+            error_df
+            .withColumn("error_stage", lit("READ_NORMALIZE"))
+            .withColumn("source_file", col("source_file").cast("string"))
+        )
+
+        if final_df is None:
+            final_df = error_df
+        else:
+            final_df = final_df.unionByName(error_df, allowMissingColumns=True)
 
     return final_df
