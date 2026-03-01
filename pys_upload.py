@@ -27,6 +27,14 @@ def pyspark_transform(spark, df, param_dict):
         except (TypeError, ValueError):
             return default
 
+    def get_int_value(raw_value, default):
+        if raw_value is None or raw_value == "":
+            return default
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return default
+
     def get_bool_param(name, default):
         raw_value = param_dict.get(name, default)
         if isinstance(raw_value, bool):
@@ -40,6 +48,17 @@ def pyspark_transform(spark, df, param_dict):
         if normalized in {"false", "0", "no", "n"}:
             return False
         return default
+
+    def get_row_value(row, column_name, default=None):
+        if row is None:
+            return default
+
+        value = row[column_name]
+        if value is None:
+            return default
+        if isinstance(value, str) and value.strip() == "":
+            return default
+        return value
 
 
     def sanitize_error_message(exc):
@@ -78,12 +97,17 @@ def pyspark_transform(spark, df, param_dict):
     # External Trigger
     # Define los parámetros de ejecución enviados por el orquestador
     # =====================================
-    host = param_dict.get("sftp_host")
-    port = get_int_param("sftp_port", 22)
-    vault = param_dict.get("sftp_vault_name")
-    nombre_archivo = param_dict.get("nombre_archivo")
-    fecha_desde = param_dict.get("fecha_desde", "YYYY-MM-DD")
-    fecha_hasta = param_dict.get("fecha_hasta", "YYYY-MM-DD")
+    param_row = df.first()
+
+    if param_row is None:
+        raise ValueError("El dataframe de entrada no contiene registros de parametría")
+
+    host = get_row_value(param_row, "sftp_host")
+    port = get_int_value(get_row_value(param_row, "sftp_port", 22), 22)
+    vault = get_row_value(param_row, "sftp_vault_name")
+    nombre_archivo = get_row_value(param_row, "nombre_archivo")
+    fecha_desde = get_row_value(param_row, "fecha_desde", "YYYY-MM-DD")
+    fecha_hasta = get_row_value(param_row, "fecha_hasta", "YYYY-MM-DD")
 
     if not host:
         raise ValueError("Falta parámetro requerido 'sftp_host'")
