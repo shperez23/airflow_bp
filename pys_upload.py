@@ -108,6 +108,8 @@ def pyspark_transform(spark, df, param_dict):
     nombre_archivo = get_row_value(param_row, "nombre_archivo")
     fecha_desde = get_row_value(param_row, "fecha_desde", "YYYY-MM-DD")
     fecha_hasta = get_row_value(param_row, "fecha_hasta", "YYYY-MM-DD")
+    sftp_root = get_row_value(param_row, "pathSftp")
+    bucket_name = get_row_value(param_row, "bucket")
 
     if not host:
         raise ValueError("Falta parámetro requerido 'sftp_host'")
@@ -126,12 +128,13 @@ def pyspark_transform(spark, df, param_dict):
     if not user or not pwd:
         raise ValueError(f"Faltan credenciales para vault '{vault}'")
 
+    if not sftp_root:
+        raise ValueError("Falta parámetro requerido 'pathSftp'")
+
     # =====================================
     # Dynamic Source Resolver Pattern
     # Permite cambiar el origen SFTP sin modificar el código
     # =====================================
-    sftp_root = df.select("pathSftp").first()[0]
-
     cnopts = pysftp.CnOpts()
     cnopts.hostkeys = None
 
@@ -139,7 +142,6 @@ def pyspark_transform(spark, df, param_dict):
     # Dataset Routing Pattern
     # Define dinámicamente el destino del dataset en el data lake
     # =====================================
-    bucket_name = param_dict.get("bucket")
     base_s3 = param_dict.get("base_s3")
     base_control_s3 = param_dict.get("base_control_s3")
 
