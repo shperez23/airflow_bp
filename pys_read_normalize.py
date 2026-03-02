@@ -98,22 +98,8 @@ def pyspark_transform(spark, df, param_dict):
             "error_message",
             "coalesce(source_file, path) as source_file"
         )
-    elif {"s3_key", "status"}.issubset(input_cols):
-        bucket_raw = param_dict.get("bucket_raw") or param_dict.get("bucket")
-        if is_missing(bucket_raw):
-            raise ValueError("Falta parámetro requerido 'bucket_raw' (o 'bucket') para resolver s3_key")
-        files_df = (
-            input_df
-            .where((input_df.status == "PROCESADO") & (input_df.s3_key.isNotNull()) & (input_df.s3_key != ""))
-            .selectExpr(
-                f"concat('s3a://{bucket_raw}/', s3_key) as path",
-                "'PENDING' as status",
-                "cast(null as string) as error_message",
-                f"concat('s3a://{bucket_raw}/', s3_key) as source_file"
-            )
-        )
     else:
-        raise ValueError("El input de pys_read_normalize debe incluir columna 'path' o contrato con 's3_key'/'status'")
+        raise ValueError("El input de pys_read_normalize debe incluir la columna 'path'")
 
     file_rows = files_df.distinct().collect()
     files = [r.path for r in file_rows if not is_missing(r.path) and (r.status == "PENDING")]
