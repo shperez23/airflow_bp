@@ -2,9 +2,16 @@ from pyspark.sql.functions import current_timestamp, lit, col
 from pyspark.sql.types import StructType, StructField, StringType
 import uuid
 import json
+import io
+import os
+import shutil
+import tempfile
+import zipfile
 
 
 def pyspark_transform(spark, df, param_dict):
+
+    temp_dirs_to_cleanup = []
 
     # =====================================
     # Parameter Guard Pattern
@@ -144,14 +151,19 @@ def pyspark_transform(spark, df, param_dict):
     # Dynamic Reader Pattern (helper)
     # Selecciona dinámicamente el lector según la extensión del archivo
     # =====================================
-    def get_ext(path):
-        p = path.lower()
+    def compression_suffix(path):
+        lower_path = str(path).lower()
+        for suffix in (".gzip", ".gz", ".bz2", ".zip"):
+            if lower_path.endswith(suffix):
+                return suffix
+        return None
 
-        compression_suffixes = (".gz", ".gzip", ".bz2", ".zip")
-        for suffix in compression_suffixes:
-            if p.endswith(suffix):
-                p = p[: -len(suffix)]
-                break
+    def get_ext(path):
+        p = str(path).lower()
+
+        suffix = compression_suffix(p)
+        if suffix is not None:
+            p = p[: -len(suffix)]
 
         if p.endswith((".xlsx", ".xls")):
             return "excel"
@@ -173,6 +185,66 @@ def pyspark_transform(spark, df, param_dict):
         filename = path.split("/")[-1]
         stem = filename.split(".")[0]
         return stem.split("_")[0] if "_" in stem else stem
+
+    # =====================================
+    # Compressed Archive Expansion Pattern (helper)
+    # Expande ZIPs en archivos temporales para procesar múltiples entradas internas
+    # =====================================
+    def expand_input_paths(path):
+        suffix = compression_suffix(path)
+
+        if suffix in {".gz", ".gzip", ".bz2"}:
+            if get_ext(path) == "unknown":
+                raise ValueError(f"No hay reader_options definidos para archivo comprimido: {path}")
+            return [{"read_path": path, "trace_path": path, "source_file": path}]
+
+        if suffix != ".zip":
+            return [{"read_path": path, "trace_path": path, "source_file": path}]
+
+        binary_rows = (
+            spark.read
+            .format("binaryFile")
+            .load(path)
+            .select("content")
+            .take(1)
+        )
+
+        if not binary_rows:
+            raise ValueError(f"No se pudo leer el contenido binario del ZIP: {path}")
+
+        temp_dir = tempfile.mkdtemp(prefix="pys_read_normalize_zip_")
+        temp_dirs_to_cleanup.append(temp_dir)
+
+        expanded_files = []
+        with zipfile.ZipFile(io.BytesIO(binary_rows[0]["content"])) as zip_ref:
+            for member in zip_ref.infolist():
+                if member.is_dir():
+                    continue
+
+                member_name = member.filename
+                member_ext = get_ext(member_name)
+                if member_ext == "unknown":
+                    continue
+
+                member_basename = os.path.basename(member_name)
+                local_member_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{member_basename}")
+
+                with zip_ref.open(member) as source_member, open(local_member_path, "wb") as target_member:
+                    shutil.copyfileobj(source_member, target_member)
+
+                trace_path = f"{path}::{member_name}"
+                expanded_files.append(
+                    {
+                        "read_path": local_member_path,
+                        "trace_path": trace_path,
+                        "source_file": trace_path,
+                    }
+                )
+
+        if not expanded_files:
+            raise ValueError(f"El ZIP no contiene archivos legibles por pys_read_normalize: {path}")
+
+        return expanded_files
 
     # =====================================
     # Schema Normalizer Pattern (helper)
@@ -286,43 +358,66 @@ def pyspark_transform(spark, df, param_dict):
             inferred_dataset,
         ))
 
-    for file in files:
+    try:
+        for file in files:
 
-        dset = dataset_name(file)
+            try:
+                read_targets = expand_input_paths(file)
+            except Exception as exc:
+                dset = dataset_name(file)
+                error_records.append((
+                    file,
+                    "ERROR_READ",
+                    sanitize_error_message(exc),
+                    None,
+                    file,
+                    None,
+                    dset,
+                ))
+                continue
 
-        try:
-            df_read = read_dynamic(file)
-        except Exception as exc:
-            error_records.append((
-                file,
-                "ERROR_READ",
-                sanitize_error_message(exc),
-                None,
-                file,
-                None,
-                dset,
-            ))
-            continue
+            for target in read_targets:
+                dset = dataset_name(target["source_file"])
 
-        batch_id = str(uuid.uuid4())
-        df_read = (
-            df_read
-            .withColumn("ingestion_ts", current_timestamp())
-            .withColumn("source_file", lit(file))
-            .withColumn("path", lit(file))
-            .withColumn("batch_id", lit(batch_id))
-            .withColumn("dataset", lit(dset))
-            .withColumn("record_status", lit("PROCESADO"))
-            .withColumn("error_stage", lit(None).cast("string"))
-            .withColumn("error_message", lit(None).cast("string"))
-        )
+                try:
+                    df_read = read_dynamic(target["read_path"])
+                except Exception as exc:
+                    error_records.append((
+                        target["trace_path"],
+                        "ERROR_READ",
+                        sanitize_error_message(exc),
+                        None,
+                        target["source_file"],
+                        None,
+                        dset,
+                    ))
+                    continue
 
-        df_read = cast_all_to_string(df_read)
+                batch_id = str(uuid.uuid4())
+                df_read = (
+                    df_read
+                    .withColumn("ingestion_ts", current_timestamp())
+                    .withColumn("source_file", lit(target["source_file"]))
+                    .withColumn("path", lit(target["trace_path"]))
+                    .withColumn("batch_id", lit(batch_id))
+                    .withColumn("dataset", lit(dset))
+                    .withColumn("record_status", lit("PROCESADO"))
+                    .withColumn("error_stage", lit(None).cast("string"))
+                    .withColumn("error_message", lit(None).cast("string"))
+                )
 
-        if dset not in datasets:
-            datasets[dset] = df_read
-        else:
-            datasets[dset] = datasets[dset].unionByName(df_read, allowMissingColumns=True)
+                df_read = cast_all_to_string(df_read)
+
+                if dset not in datasets:
+                    datasets[dset] = df_read
+                else:
+                    datasets[dset] = datasets[dset].unionByName(df_read, allowMissingColumns=True)
+    finally:
+        for temp_dir in temp_dirs_to_cleanup:
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass
 
     if not datasets and not error_records:
         empty_schema = StructType([
