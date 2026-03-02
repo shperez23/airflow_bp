@@ -80,14 +80,14 @@ def pyspark_transform(spark, df, param_dict):
         # Conserva el comportamiento anterior cuando discovery se ejecuta standalone
         # =====================================
         bucket_raw = param_dict.get("bucket_raw")
-        raw_prefix = param_dict.get("raw_prefix")
+        relative_upload_file_path = param_dict.get("relative_upload_file_path")
 
         if is_missing(bucket_raw):
             raise ValueError("Falta parámetro requerido 'bucket_raw'")
-        if is_missing(raw_prefix):
-            raise ValueError("Falta parámetro requerido 'raw_prefix'")
+        if is_missing(relative_upload_file_path):
+            raise ValueError("Falta parámetro requerido 'relative_upload_file_path'")
 
-        raw_path = f"s3a://{bucket_raw}/{raw_prefix}"
+        raw_path = f"s3a://{bucket_raw}/{relative_upload_file_path}"
         pending = (
             spark.read
             .format("binaryFile")

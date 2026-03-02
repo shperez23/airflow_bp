@@ -102,34 +102,34 @@ def pyspark_transform(spark, df, param_dict):
     if param_row is None:
         raise ValueError("El dataframe de entrada no contiene registros de parametría")
 
-    host = get_row_value(param_row, "sftp_host")
-    port = get_int_value(get_row_value(param_row, "sftp_port", 22), 22)
-    vault = get_row_value(param_row, "sftp_vault_name")
-    nombre_archivo = get_row_value(param_row, "nombre_archivo")
-    fecha_desde = get_row_value(param_row, "fecha_desde", "YYYY-MM-DD")
-    fecha_hasta = get_row_value(param_row, "fecha_hasta", "YYYY-MM-DD")
-    sftp_root = get_row_value(param_row, "pathSftp")
-    bucket_name = get_row_value(param_row, "bucket")
+    sftp_host = get_row_value(param_row, "SFTP_HOST")
+    sftp_port = get_int_value(get_row_value(param_row, "SFTP_PORT", 22), 22)
+    sftp_vault_name = get_row_value(param_row, "SFTP_VAULT_NAME")
+    nombre_archivo = get_row_value(param_row, "NOMBRE_ARCHIVO")
+    fecha_desde = get_row_value(param_row, "FECHA_DESDE", "YYYY-MM-DD")
+    fecha_hasta = get_row_value(param_row, "FECHA_HASTA", "YYYY-MM-DD")
+    sftp_path = get_row_value(param_row, "SFTP_PATH")
+    bucket_name = get_row_value(param_row, "BUCKET")
 
-    if not host:
-        raise ValueError("Falta parámetro requerido 'sftp_host'")
-    if not vault:
-        raise ValueError("Falta parámetro requerido 'sftp_vault_name'")
+    if not sftp_host:
+        raise ValueError("Falta parámetro requerido 'SFTP_HOST'")
+    if not sftp_vault_name:
+        raise ValueError("Falta parámetro requerido 'SFTP_VAULT_NAME'")
     if not nombre_archivo:
-        raise ValueError("Falta parámetro requerido 'nombre_archivo'")
+        raise ValueError("Falta parámetro requerido 'NOMBRE_ARCHIVO'")
 
     # =====================================
     # Secrets Pointer Pattern
-    # Obtiene credenciales desde vault sin hardcodearlas
+    # Obtiene credenciales desde sftp_vault_name sin hardcodearlas
     # =====================================
-    user = spark.conf.get(f"spark.db.{vault}.user", "")
-    pwd = spark.conf.get(f"spark.db.{vault}.pass", "")
+    user = spark.conf.get(f"spark.db.{sftp_vault_name}.user", "")
+    pwd = spark.conf.get(f"spark.db.{sftp_vault_name}.pass", "")
 
     if not user or not pwd:
-        raise ValueError(f"Faltan credenciales para vault '{vault}'")
+        raise ValueError(f"Faltan credenciales para sftp_vault_name '{sftp_vault_name}'")
 
-    if not sftp_root:
-        raise ValueError("Falta parámetro requerido 'pathSftp'")
+    if not sftp_path:
+        raise ValueError("Falta parámetro requerido 'SFTP_PATH'")
 
     # =====================================
     # Dynamic Source Resolver Pattern
@@ -142,15 +142,15 @@ def pyspark_transform(spark, df, param_dict):
     # Dataset Routing Pattern
     # Define dinámicamente el destino del dataset en el data lake
     # =====================================
-    base_s3 = param_dict.get("base_s3")
-    base_control_s3 = param_dict.get("base_control_s3")
+    relative_upload_file_path = param_dict.get("relative_upload_file_path")
+    relative_upload_control_path = param_dict.get("relative_upload_control_path")
 
     if not bucket_name:
         raise ValueError("Falta parámetro requerido 'bucket'")
-    if not base_s3:
-        raise ValueError("Falta parámetro requerido 'base_s3'")
-    if not base_control_s3:
-        raise ValueError("Falta parámetro requerido 'base_control_s3'")
+    if not relative_upload_file_path:
+        raise ValueError("Falta parámetro requerido 'relative_upload_file_path'")
+    if not relative_upload_control_path:
+        raise ValueError("Falta parámetro requerido 'relative_upload_control_path'")
 
     # =====================================
     # Naming Strategy Pattern
@@ -197,15 +197,15 @@ def pyspark_transform(spark, df, param_dict):
     # Checkpointer Pattern
     # Mantiene el estado de archivos procesados para evitar reprocesos
     # =====================================
-    CHECKPOINT = f"s3a://{bucket_name}/{base_control_s3}/checkpoints/files/"
+    CHECKPOINT = f"s3a://{bucket_name}/{relative_upload_control_path}/checkpoints/files/"
 
     # =====================================
     # Namespace Isolation Pattern
     # Separa zonas del data lake para evitar contaminación de datos
     # =====================================
-    QUARANTINE = f"{base_s3}/quarantine/"
-    RAW_PREFIX = f"{base_s3}/original/"
-    UNCOMP_PREFIX = f"{base_s3}/uncompressed/"
+    QUARANTINE = f"{relative_upload_file_path}/quarantine/"
+    RAW_PREFIX = f"{relative_upload_file_path}/original/"
+    UNCOMP_PREFIX = f"{relative_upload_file_path}/uncompressed/"
 
     # =====================================
     # Idempotent Consumer Pattern
@@ -272,9 +272,9 @@ def pyspark_transform(spark, df, param_dict):
     # External Connector Pattern (SFTP)
     # Maneja la conexión externa desacoplada del resto del pipeline
     # =====================================
-    with pysftp.Connection(host=host, port=port, username=user, password=pwd, cnopts=cnopts) as sftp:
+    with pysftp.Connection(host=sftp_host, port=sftp_port, username=user, password=pwd, cnopts=cnopts) as sftp:
 
-        archivos = list_files_recursive(sftp, sftp_root)
+        archivos = list_files_recursive(sftp, sftp_path)
 
         for remoto in archivos:
 
@@ -282,7 +282,7 @@ def pyspark_transform(spark, df, param_dict):
             # Path Preservation Pattern
             # Evita sobrescrituras y mantiene trazabilidad del origen
             # =====================================
-            rel_path = remoto[len(sftp_root):].lstrip("/")
+            rel_path = remoto[len(sftp_path):].lstrip("/")
             remote_filename = os.path.basename(remoto)
             tmp_file = f"/tmp/{uuid.uuid4().hex}"
 
