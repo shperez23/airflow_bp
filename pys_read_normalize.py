@@ -3,15 +3,12 @@ from pyspark.sql.types import StructType, StructField, StringType
 import uuid
 import json
 import io
-import os
-import shutil
-import tempfile
+import boto3
 import zipfile
 
 
 def pyspark_transform(spark, df, param_dict):
 
-    temp_dirs_to_cleanup = []
 
     # =====================================
     # Parameter Guard Pattern
@@ -186,6 +183,99 @@ def pyspark_transform(spark, df, param_dict):
         stem = filename.split(".")[0]
         return stem.split("_")[0] if "_" in stem else stem
 
+    def parse_s3_uri(uri):
+        value = str(uri)
+        if value.startswith("s3a://"):
+            value = value[len("s3a://"):]
+        elif value.startswith("s3://"):
+            value = value[len("s3://"):]
+        else:
+            return None, None
+
+        if "/" not in value:
+            return value, ""
+
+        bucket, key = value.split("/", 1)
+        return bucket, key
+
+    def resolve_zip_staging_target(zip_path):
+        target_bucket = param_dict.get("bucket_raw") or param_dict.get("bucket")
+        if is_missing(target_bucket):
+            target_bucket, _ = parse_s3_uri(zip_path)
+
+        if is_missing(target_bucket):
+            raise ValueError(
+                "No se pudo resolver bucket para expansión ZIP. Defina 'bucket_raw' o use path s3/s3a válido."
+            )
+
+        raw_prefix = param_dict.get("zip_extract_prefix") or "tmp/pys_read_normalize_zip"
+        normalized_prefix = str(raw_prefix).strip().strip("/")
+        if normalized_prefix == "":
+            normalized_prefix = "tmp/pys_read_normalize_zip"
+
+        run_id = str(uuid.uuid4())
+        return target_bucket, f"{normalized_prefix}/{run_id}"
+
+    # =====================================
+    # Compressed Archive Expansion Pattern (helper)
+    # Expande ZIPs en archivos temporales para procesar múltiples entradas internas
+    # =====================================
+    def expand_input_paths(path):
+        suffix = compression_suffix(path)
+
+        if suffix in {".gz", ".gzip", ".bz2"}:
+            if get_ext(path) == "unknown":
+                raise ValueError(f"No hay reader_options definidos para archivo comprimido: {path}")
+            return [{"read_path": path, "trace_path": path, "source_file": path}]
+
+        if suffix != ".zip":
+            return [{"read_path": path, "trace_path": path, "source_file": path}]
+
+        binary_rows = (
+            spark.read
+            .format("binaryFile")
+            .load(path)
+            .select("content")
+            .take(1)
+        )
+
+        if not binary_rows:
+            raise ValueError(f"No se pudo leer el contenido binario del ZIP: {path}")
+
+        staging_bucket, staging_prefix = resolve_zip_staging_target(path)
+        s3_client = boto3.client("s3")
+
+        expanded_files = []
+        with zipfile.ZipFile(io.BytesIO(binary_rows[0]["content"])) as zip_ref:
+            for member in zip_ref.infolist():
+                if member.is_dir():
+                    continue
+
+                member_name = member.filename
+                member_ext = get_ext(member_name)
+                if member_ext == "unknown":
+                    continue
+
+                member_basename = member_name.split("/")[-1]
+                staged_key = f"{staging_prefix}/{uuid.uuid4()}_{member_basename}"
+
+                with zip_ref.open(member) as source_member:
+                    s3_client.put_object(Bucket=staging_bucket, Key=staged_key, Body=source_member.read())
+
+                trace_path = f"{path}::{member_name}"
+                expanded_files.append(
+                    {
+                        "read_path": f"s3a://{staging_bucket}/{staged_key}",
+                        "trace_path": trace_path,
+                        "source_file": trace_path,
+                    }
+                )
+
+        if not expanded_files:
+            raise ValueError(f"El ZIP no contiene archivos legibles por pys_read_normalize: {path}")
+
+        return expanded_files
+
     # =====================================
     # Compressed Archive Expansion Pattern (helper)
     # Expande ZIPs en archivos temporales para procesar múltiples entradas internas
@@ -358,67 +448,59 @@ def pyspark_transform(spark, df, param_dict):
             inferred_dataset,
         ))
 
-    try:
-        for file in files:
+    for file in files:
+
+        try:
+            read_targets = expand_input_paths(file)
+        except Exception as exc:
+            dset = dataset_name(file)
+            error_records.append((
+                file,
+                "ERROR_READ",
+                sanitize_error_message(exc),
+                None,
+                file,
+                None,
+                dset,
+            ))
+            continue
+
+        for target in read_targets:
+            dset = dataset_name(target["source_file"])
 
             try:
-                read_targets = expand_input_paths(file)
+                df_read = read_dynamic(target["read_path"])
             except Exception as exc:
-                dset = dataset_name(file)
                 error_records.append((
-                    file,
+                    target["trace_path"],
                     "ERROR_READ",
                     sanitize_error_message(exc),
                     None,
-                    file,
+                    target["source_file"],
                     None,
                     dset,
                 ))
                 continue
 
-            for target in read_targets:
-                dset = dataset_name(target["source_file"])
+            batch_id = str(uuid.uuid4())
+            df_read = (
+                df_read
+                .withColumn("ingestion_ts", current_timestamp())
+                .withColumn("source_file", lit(target["source_file"]))
+                .withColumn("path", lit(target["trace_path"]))
+                .withColumn("batch_id", lit(batch_id))
+                .withColumn("dataset", lit(dset))
+                .withColumn("record_status", lit("PROCESADO"))
+                .withColumn("error_stage", lit(None).cast("string"))
+                .withColumn("error_message", lit(None).cast("string"))
+            )
 
-                try:
-                    df_read = read_dynamic(target["read_path"])
-                except Exception as exc:
-                    error_records.append((
-                        target["trace_path"],
-                        "ERROR_READ",
-                        sanitize_error_message(exc),
-                        None,
-                        target["source_file"],
-                        None,
-                        dset,
-                    ))
-                    continue
+            df_read = cast_all_to_string(df_read)
 
-                batch_id = str(uuid.uuid4())
-                df_read = (
-                    df_read
-                    .withColumn("ingestion_ts", current_timestamp())
-                    .withColumn("source_file", lit(target["source_file"]))
-                    .withColumn("path", lit(target["trace_path"]))
-                    .withColumn("batch_id", lit(batch_id))
-                    .withColumn("dataset", lit(dset))
-                    .withColumn("record_status", lit("PROCESADO"))
-                    .withColumn("error_stage", lit(None).cast("string"))
-                    .withColumn("error_message", lit(None).cast("string"))
-                )
-
-                df_read = cast_all_to_string(df_read)
-
-                if dset not in datasets:
-                    datasets[dset] = df_read
-                else:
-                    datasets[dset] = datasets[dset].unionByName(df_read, allowMissingColumns=True)
-    finally:
-        for temp_dir in temp_dirs_to_cleanup:
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
-
+            if dset not in datasets:
+                datasets[dset] = df_read
+            else:
+                datasets[dset] = datasets[dset].unionByName(df_read, allowMissingColumns=True)
     if not datasets and not error_records:
         empty_schema = StructType([
             StructField("ingestion_ts", StringType(), True),
