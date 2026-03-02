@@ -155,12 +155,12 @@ flowchart TD
     G --> H{Parámetros completos?}
     H -- No --> Z2[ValueError]
     H -- Sí --> I[Agregar columnas write_ts/table_name]
-    I --> J[Escribir snapshot parquet en current]
+    I --> J[Escribir snapshot parquet en nombre_tabla]
     J --> K[Construir history_df con execution_id]
     K --> L{ENABLE_REPROCESS y history existente?}
     L -- Sí --> M[Eliminar execution_id previo del Delta]
     L -- No --> N[Continuar append]
     M --> N
-    N --> O[Append en history_delta formato Delta]
+    N --> O[Append en nombre_tabla_shist formato Delta]
     O --> P[Retornar dataframe de control de escritura]
 ```
