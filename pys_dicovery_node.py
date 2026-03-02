@@ -25,10 +25,17 @@ def pyspark_transform(spark, df, param_dict):
     include_upload_skipped = get_bool_param("include_upload_skipped", False)
 
     # =====================================
+    # Multi-Input Resolver Pattern
+    # Resuelve entradas cuando el orquestador envía múltiples dataframes
+    # =====================================
+    upload_df = df.get("pys_upload") if hasattr(df, "get") else df
+    param_discovery_row = df.get("tri_parametros_discovery") if hasattr(df, "get") else None
+
+    # =====================================
     # Upload Result Contract Pattern
     # Detecta si el input proviene del nodo pys_upload (columnas de resultado)
     # =====================================
-    input_cols = set(df.columns)
+    input_cols = set(upload_df.columns)
     has_upload_contract = {"full_path", "s3_key", "status"}.issubset(input_cols)
 
     # =====================================
@@ -40,13 +47,17 @@ def pyspark_transform(spark, df, param_dict):
         # Storage URI Resolver Pattern
         # Convierte s3_key de upload a path s3a:// consumible por Spark
         # =====================================
-        bucket_raw = param_dict.get("bucket_raw") or param_dict.get("bucket")
+        if param_discovery_row is not None:
+            bucket_raw = param_discovery_row["BUCKET_BLOB"]
+        else:
+            bucket_raw = param_dict.get("bucket_raw") or param_dict.get("bucket")
+
         if is_missing(bucket_raw):
             raise ValueError("Falta parámetro requerido 'bucket_raw' (o 'bucket') para resolver paths desde s3_key")
 
         pending = (
-            df
-            .where((df.status == "PROCESADO") & (df.s3_key.isNotNull()) & (df.s3_key != ""))
+            upload_df
+            .where((upload_df.status == "PROCESADO") & (upload_df.s3_key.isNotNull()) & (upload_df.s3_key != ""))
             .selectExpr(
                 f"concat('s3a://{bucket_raw}/', s3_key) as path",
                 "'PENDING' as discovery_status",
@@ -57,9 +68,9 @@ def pyspark_transform(spark, df, param_dict):
         )
 
         if include_upload_errors:
-            upload_errors_df = df.where((df.status != "PROCESADO") & df.status.rlike("^ERROR"))
+            upload_errors_df = upload_df.where((upload_df.status != "PROCESADO") & upload_df.status.rlike("^ERROR"))
             if include_upload_skipped:
-                upload_errors_df = df.where((df.status != "PROCESADO") & (df.status.rlike("^ERROR") | df.status.rlike("^SKIPPED")))
+                upload_errors_df = upload_df.where((upload_df.status != "PROCESADO") & (upload_df.status.rlike("^ERROR") | upload_df.status.rlike("^SKIPPED")))
 
             upload_errors = (
                 upload_errors_df
@@ -101,7 +112,10 @@ def pyspark_transform(spark, df, param_dict):
     # Checkpointer Pattern
     # Excluye archivos ya procesados por pys_read_normalize (left_anti)
     # =====================================
-    bucket_curated = param_dict.get("bucket_curated")
+    if param_discovery_row is not None:
+        bucket_curated = param_discovery_row["BUCKET_RAW"]
+    else:
+        bucket_curated = param_dict.get("bucket_curated")
     checkpoint_prefix = param_dict.get("checkpoint_prefix")
 
     if is_missing(bucket_curated):
