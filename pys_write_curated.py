@@ -103,9 +103,10 @@ def pyspark_transform(spark, df, param_dict):
     # Dataset Materializer Pattern
     # Escribe snapshot actual en parquet para consumo operativo
     # =====================================
-    base_path = f"{str(ruta_salida).rstrip('/')}/{str(nombre_tabla).strip('/')}"
-    current_path = f"{base_path}/current"
-    history_path = f"{base_path}/history_delta"
+    sanitized_table_name = str(nombre_tabla).strip("/")
+    output_root = str(ruta_salida).rstrip("/")
+    current_path = f"{output_root}/{sanitized_table_name}"
+    history_path = f"{output_root}/{sanitized_table_name}_shist"
 
     df_with_audit = (
         input_df
