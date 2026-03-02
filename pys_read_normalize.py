@@ -21,6 +21,21 @@ def pyspark_transform(spark, df, param_dict):
         message = str(exc).strip()
         return message if message else exc.__class__.__name__
 
+    def build_s3_client_from_runtime():
+        access_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.access.key", None)
+        secret_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.secret.key", None)
+        session_token = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.session.token", None)
+
+        if access_key and secret_key:
+            return boto3.client(
+                "s3",
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                aws_session_token=session_token,
+            )
+
+        return boto3.client("s3")
+
     # =====================================
     # Multi-Input Resolver Pattern
     # Resuelve entradas cuando el orquestador envía múltiples dataframes
@@ -215,7 +230,7 @@ def pyspark_transform(spark, df, param_dict):
             raise ValueError(f"No se pudo leer el contenido binario del ZIP: {path}")
 
         staging_bucket, staging_prefix = resolve_zip_staging_target(path)
-        s3_client = boto3.client("s3")
+        s3_client = build_s3_client_from_runtime()
 
         expanded_files = []
         with zipfile.ZipFile(io.BytesIO(binary_rows[0]["content"])) as zip_ref:
