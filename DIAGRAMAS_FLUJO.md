@@ -34,8 +34,8 @@ flowchart TD
     OP --> P[Agregar checkpoint_records + resultado PROCESADO]
     OQ --> P
     G -->|Error por archivo| QE[Subir a QUARANTINE + ERROR_UPLOAD]
-    P --> R[Persistir checkpoint en parquet (append)]
-    R --> S[Construir DataFrame de auditoría resultados]
+    P --> R[Persistir checkpoint parquet append]
+    R --> S[Construir dataframe auditoria]
     S --> T[Return DataFrame]
 ```
 
@@ -44,12 +44,12 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[Inicio pyspark_transform] --> B[Resolver flags include_upload_errors / skipped]
-    B --> C{Input incluye contrato upload?\nfull_path,s3_key,status}
-    C -- Sí --> D[Filtrar status PROCESADO y construir path s3a://bucket_raw/s3_key]
+    B --> C{Input contrato upload}
+    C -- Sí --> D[Construir path s3a desde s3_key]
     D --> E{include_upload_errors?}
     E -- Sí --> F[Agregar errores/skipped heredados como filas sin path]
     E -- No --> G[Continuar solo pendientes]
-    C -- No --> H[Modo standalone: leer binaryFile desde bucket_raw/relative_upload_file_path]
+    C -- No --> H[Modo standalone leer binaryFile]
     H --> G
     F --> G
     G --> I[Validar bucket_curated y checkpoint_prefix]
@@ -57,7 +57,7 @@ flowchart TD
     J --> K{Checkpoint disponible?}
     K -- Sí --> L[left_anti join para excluir paths ya procesados]
     K -- No --> M[Usar pendientes distinct]
-    L --> N{Hay upload_errors?}
+    L --> N{Hay errores heredados}
     M --> N
     N -- Sí --> O[unionByName con upload_errors]
     N -- No --> P[Continuar]
