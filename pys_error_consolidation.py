@@ -1,4 +1,4 @@
-from pyspark.sql.functions import col, lit, current_timestamp, coalesce, trim
+from pyspark.sql.functions import col, lit, current_timestamp, coalesce
 from pyspark.sql.types import StructType, StructField, StringType
 
 
@@ -37,7 +37,6 @@ def pyspark_transform(spark, df, param_dict):
     upload_df = flow_inputs.get("pys_upload") if hasattr(flow_inputs, "get") else None
     discovery_df = flow_inputs.get("pys_discovery_node") if hasattr(flow_inputs, "get") else None
     read_df = flow_inputs.get("pys_read_normalize_node") if hasattr(flow_inputs, "get") else None
-    summary_df = flow_inputs.get("pys_ingestion_summary") if hasattr(flow_inputs, "get") else None
 
     if not hasattr(df, "get"):
         input_cols = set(df.columns)
@@ -47,8 +46,6 @@ def pyspark_transform(spark, df, param_dict):
             discovery_df = df
         elif {"record_status", "error_stage"}.issubset(input_cols):
             read_df = df
-        elif {"estado_ingesta", "error"}.issubset(input_cols):
-            summary_df = df
 
     # =====================================
     # Error Contract Pattern
@@ -138,31 +135,10 @@ def pyspark_transform(spark, df, param_dict):
             )
         )
 
-    def map_summary_errors(stage_df):
-        if stage_df is None:
-            return None
-
-        return (
-            stage_df
-            .where((col("estado_ingesta") == "COMPLETADO_CON_ERRORES") | (col("error").isNotNull() & (trim(col("error")) != "")))
-            .select(
-                lit(None).cast("string").alias("error_consolidation_ts"),
-                lit("INGESTION_SUMMARY").alias("flow_stage"),
-                lit("ERROR_SUMMARY").alias("error_code"),
-                coalesce(col("error").cast("string"), col("estado_ingesta").cast("string")).alias("error_message"),
-                lit(None).cast("string").alias("source_file"),
-                lit(None).cast("string").alias("path"),
-                col("dataset").cast("string").alias("dataset"),
-                col("batch_id").cast("string").alias("batch_id"),
-                lit("pys_ingestion_summary").alias("error_origin"),
-            )
-        )
-
     staged_errors = [
         map_upload_errors(upload_df),
         map_discovery_errors(discovery_df),
         map_read_errors(read_df),
-        map_summary_errors(summary_df),
     ]
 
     # =====================================
