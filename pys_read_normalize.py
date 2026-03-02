@@ -249,66 +249,6 @@ def pyspark_transform(spark, df, param_dict):
         return expanded_files
 
     # =====================================
-    # Compressed Archive Expansion Pattern (helper)
-    # Expande ZIPs en archivos temporales para procesar múltiples entradas internas
-    # =====================================
-    def expand_input_paths(path):
-        suffix = compression_suffix(path)
-
-        if suffix in {".gz", ".gzip", ".bz2"}:
-            if get_ext(path) == "unknown":
-                raise ValueError(f"No hay reader_options definidos para archivo comprimido: {path}")
-            return [{"read_path": path, "trace_path": path, "source_file": path}]
-
-        if suffix != ".zip":
-            return [{"read_path": path, "trace_path": path, "source_file": path}]
-
-        binary_rows = (
-            spark.read
-            .format("binaryFile")
-            .load(path)
-            .select("content")
-            .take(1)
-        )
-
-        if not binary_rows:
-            raise ValueError(f"No se pudo leer el contenido binario del ZIP: {path}")
-
-        temp_dir = tempfile.mkdtemp(prefix="pys_read_normalize_zip_")
-        temp_dirs_to_cleanup.append(temp_dir)
-
-        expanded_files = []
-        with zipfile.ZipFile(io.BytesIO(binary_rows[0]["content"])) as zip_ref:
-            for member in zip_ref.infolist():
-                if member.is_dir():
-                    continue
-
-                member_name = member.filename
-                member_ext = get_ext(member_name)
-                if member_ext == "unknown":
-                    continue
-
-                member_basename = os.path.basename(member_name)
-                local_member_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{member_basename}")
-
-                with zip_ref.open(member) as source_member, open(local_member_path, "wb") as target_member:
-                    shutil.copyfileobj(source_member, target_member)
-
-                trace_path = f"{path}::{member_name}"
-                expanded_files.append(
-                    {
-                        "read_path": local_member_path,
-                        "trace_path": trace_path,
-                        "source_file": trace_path,
-                    }
-                )
-
-        if not expanded_files:
-            raise ValueError(f"El ZIP no contiene archivos legibles por pys_read_normalize: {path}")
-
-        return expanded_files
-
-    # =====================================
     # Schema Normalizer Pattern (helper)
     # Homogeniza el esquema: convierte todos los campos a string
     # =====================================
