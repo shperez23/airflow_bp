@@ -43,8 +43,8 @@ def pyspark_transform(spark, df, param_dict):
         except Exception:
             return None
 
-    bucket_raw = get_param_discovery_value(param_discovery_row, "BUCKET_BLOB")
-    bucket_curated = get_param_discovery_value(param_discovery_row, "BUCKET_RAW")
+    bucket_blob = get_param_discovery_value(param_discovery_row, "BUCKET_BLOB")
+    bucket_raw = get_param_discovery_value(param_discovery_row, "BUCKET_RAW")
 
     # =====================================
     # Upload Result Contract Pattern
@@ -62,17 +62,17 @@ def pyspark_transform(spark, df, param_dict):
         # Storage URI Resolver Pattern
         # Convierte s3_key de upload a path s3a:// consumible por Spark
         # =====================================
-        if is_missing(bucket_raw):
+        if is_missing(bucket_blob):
             raise ValueError("Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_discovery para resolver paths desde s3_key")
 
         pending = (
             upload_df
             .where((upload_df.status == "PROCESADO") & (upload_df.s3_key.isNotNull()) & (upload_df.s3_key != ""))
             .selectExpr(
-                f"concat('s3a://{bucket_raw}/', s3_key) as path",
+                f"concat('s3a://{bucket_blob}/', s3_key) as path",
                 "'PENDING' as discovery_status",
                 "cast(null as string) as error_message",
-                f"concat('s3a://{bucket_raw}/', s3_key) as source_file"
+                f"concat('s3a://{bucket_blob}/', s3_key) as source_file"
             )
             .distinct()
         )
@@ -102,12 +102,12 @@ def pyspark_transform(spark, df, param_dict):
         # =====================================
         relative_upload_file_path = param_dict.get("relative_upload_file_path")
 
-        if is_missing(bucket_raw):
+        if is_missing(bucket_blob):
             raise ValueError("Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_discovery")
         if is_missing(relative_upload_file_path):
             raise ValueError("Falta parámetro requerido 'relative_upload_file_path'")
 
-        raw_path = f"s3a://{bucket_raw}/{relative_upload_file_path}"
+        raw_path = f"s3a://{bucket_blob}/{relative_upload_file_path}"
         pending = (
             spark.read
             .format("binaryFile")
@@ -123,12 +123,12 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     checkpoint_prefix = param_dict.get("checkpoint_prefix")
 
-    if is_missing(bucket_curated):
+    if is_missing(bucket_raw):
         raise ValueError("Falta parámetro requerido 'BUCKET_RAW' en tri_parametros_discovery")
     if is_missing(checkpoint_prefix):
         raise ValueError("Falta parámetro requerido 'checkpoint_prefix'")
 
-    checkpoint_path = f"s3a://{bucket_curated}/{checkpoint_prefix}"
+    checkpoint_path = f"s3a://{bucket_raw}/{checkpoint_prefix}"
 
     try:
         processed = spark.read.parquet(checkpoint_path).select("path").distinct()

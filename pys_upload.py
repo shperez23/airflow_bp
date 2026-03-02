@@ -109,7 +109,7 @@ def pyspark_transform(spark, df, param_dict):
     fecha_desde = get_row_value(param_row, "FECHA_DESDE", "YYYY-MM-DD")
     fecha_hasta = get_row_value(param_row, "FECHA_HASTA", "YYYY-MM-DD")
     sftp_path = get_row_value(param_row, "SFTP_PATH")
-    bucket_name = get_row_value(param_row, "BUCKET")
+    bucket_name = get_row_value(param_row, "BUCKET_BLOB")
 
     if not sftp_host:
         raise ValueError("Falta parámetro requerido 'SFTP_HOST'")
