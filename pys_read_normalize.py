@@ -47,7 +47,6 @@ def pyspark_transform(spark, df, param_dict):
 
     input_df = resolve_input_frame(df, ["pys_discovery_node"])
     param_read_row = resolve_input_frame(df, ["tri_parametros_read", "Tri_parametros_read"])
-
     def get_param_read_value(param_source, field_name):
         if param_source is None:
             return None
@@ -59,6 +58,8 @@ def pyspark_transform(spark, df, param_dict):
             return param_source[field_name]
         except Exception:
             return None
+
+    bucket_name = get_param_read_value(param_read_row, "BUCKET_BLOB")
 
     # =====================================
     # External Trigger Pattern
@@ -169,35 +170,20 @@ def pyspark_transform(spark, df, param_dict):
         stem = filename.split(".")[0]
         return stem.split("_")[0] if "_" in stem else stem
 
-    def parse_s3_uri(uri):
-        value = str(uri)
-        if value.startswith("s3a://"):
-            value = value[len("s3a://"):]
-        elif value.startswith("s3://"):
-            value = value[len("s3://"):]
-        else:
-            return None, None
-
-        if "/" not in value:
-            return value, ""
-
-        bucket, key = value.split("/", 1)
-        return bucket, key
-
     def resolve_zip_staging_target(zip_path):
-        target_bucket = param_dict.get("bucket_raw") or param_dict.get("bucket")
-        if is_missing(target_bucket):
-            target_bucket, _ = parse_s3_uri(zip_path)
+        relative_upload_file_path = param_dict.get("relative_upload_file_path")
+        target_bucket = bucket_name
 
         if is_missing(target_bucket):
-            raise ValueError(
-                "No se pudo resolver bucket para expansión ZIP. Defina 'bucket_raw' o use path s3/s3a válido."
-            )
+            raise ValueError("Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_read")
 
-        raw_prefix = param_dict.get("zip_extract_prefix") or "tmp/pys_read_normalize_zip"
+        if is_missing(relative_upload_file_path):
+            raise ValueError("Falta parámetro requerido 'relative_upload_file_path'")
+
+        raw_prefix = f"{relative_upload_file_path}/original/descomprimido"
         normalized_prefix = str(raw_prefix).strip().strip("/")
         if normalized_prefix == "":
-            normalized_prefix = "tmp/pys_read_normalize_zip"
+            normalized_prefix = f"{relative_upload_file_path}/original/descomprimido"
 
         run_id = str(uuid.uuid4())
         return target_bucket, f"{normalized_prefix}/{run_id}"
