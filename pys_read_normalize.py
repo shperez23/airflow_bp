@@ -18,10 +18,29 @@ def pyspark_transform(spark, df, param_dict):
         return message if message else exc.__class__.__name__
 
     # =====================================
+    # Multi-Input Resolver Pattern
+    # Resuelve entradas cuando el orquestador envía múltiples dataframes
+    # =====================================
+    input_df = df.get("pys_discovery_node") if hasattr(df, "get") else df
+    param_read_row = df.get("tri_parametros_read") if hasattr(df, "get") else None
+
+    def get_param_read_value(param_source, field_name):
+        if param_source is None:
+            return None
+
+        if hasattr(param_source, "first"):
+            param_source = param_source.first()
+
+        try:
+            return param_source[field_name]
+        except Exception:
+            return None
+
+    # =====================================
     # External Trigger Pattern
     # Resuelve parámetros de ejecución enviados por el orquestador (Rocket/Airflow)
     # =====================================
-    raw_reader = param_dict.get("reader_options", {})
+    raw_reader = get_param_read_value(param_read_row, "READER_OPTIONS")
 
     if isinstance(raw_reader, str):
         raw_reader = raw_reader.strip()
@@ -35,15 +54,15 @@ def pyspark_transform(spark, df, param_dict):
     elif isinstance(raw_reader, dict):
         reader_options = raw_reader
     else:
-        raise ValueError("Parámetro 'reader_options' debe ser dict o JSON string")
+        raise ValueError("Parámetro 'READER_OPTIONS' debe ser dict o JSON string en tri_parametros_read")
 
     # =====================================
     # Input Contract Resolver Pattern
     # Acepta distintos contratos de entrada para mantener compatibilidad
     # =====================================
-    input_cols = set(df.columns)
+    input_cols = set(input_df.columns)
     if "path" in input_cols:
-        files_df = df.selectExpr(
+        files_df = input_df.selectExpr(
             "path",
             "coalesce(discovery_status, 'PENDING') as status",
             "error_message",
@@ -54,8 +73,8 @@ def pyspark_transform(spark, df, param_dict):
         if is_missing(bucket_raw):
             raise ValueError("Falta parámetro requerido 'bucket_raw' (o 'bucket') para resolver s3_key")
         files_df = (
-            df
-            .where((df.status == "PROCESADO") & (df.s3_key.isNotNull()) & (df.s3_key != ""))
+            input_df
+            .where((input_df.status == "PROCESADO") & (input_df.s3_key.isNotNull()) & (input_df.s3_key != ""))
             .selectExpr(
                 f"concat('s3a://{bucket_raw}/', s3_key) as path",
                 "'PENDING' as status",
