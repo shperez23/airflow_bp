@@ -118,3 +118,25 @@ flowchart TD
     L --> N[Return summary]
     M --> N
 ```
+
+## 5) `pys_error_consolidation.py`
+
+```mermaid
+flowchart TD
+    A[Inicio pyspark_transform] --> B[Resolver flags include_skipped y deduplicate_errors]
+    B --> C[Detectar entradas multi-nodo: upload, discovery, read, summary]
+    C --> D[Mapear errores de pys_upload a contrato canónico]
+    C --> E[Mapear errores de pys_discovery_node a contrato canónico]
+    C --> F[Mapear errores de pys_read_normalize a contrato canónico]
+    C --> G[Mapear errores de pys_ingestion_summary a contrato canónico]
+    D --> H[UnionByName de errores por etapa]
+    E --> H
+    F --> H
+    G --> H
+    H --> I{¿deduplicate_errors?}
+    I -- Sí --> J[dropDuplicates por llave de error]
+    I -- No --> K[Conservar eventos tal cual]
+    J --> L[Agregar timestamp de consolidación]
+    K --> L
+    L --> M[Return DataFrame consolidado de errores]
+```
