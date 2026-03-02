@@ -36,7 +36,7 @@ def pyspark_transform(spark, df, param_dict):
 
     upload_df = flow_inputs.get("pys_upload") if hasattr(flow_inputs, "get") else None
     discovery_df = flow_inputs.get("pys_discovery_node") if hasattr(flow_inputs, "get") else None
-    read_df = flow_inputs.get("pys_read_normalize") if hasattr(flow_inputs, "get") else None
+    read_df = flow_inputs.get("pys_read_normalize_node") if hasattr(flow_inputs, "get") else None
     summary_df = flow_inputs.get("pys_ingestion_summary") if hasattr(flow_inputs, "get") else None
 
     if not hasattr(df, "get"):
