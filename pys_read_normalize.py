@@ -21,8 +21,28 @@ def pyspark_transform(spark, df, param_dict):
     # Multi-Input Resolver Pattern
     # Resuelve entradas cuando el orquestador envía múltiples dataframes
     # =====================================
-    input_df = df.get("pys_discovery_node") if hasattr(df, "get") else df
-    param_read_row = df.get("tri_parametros_read") if hasattr(df, "get") else None
+    def resolve_input_frame(flow_inputs, preferred_keys):
+        if not hasattr(flow_inputs, "get"):
+            return flow_inputs
+
+        for key in preferred_keys:
+            candidate = flow_inputs.get(key)
+            if candidate is not None:
+                return candidate
+
+        try:
+            values = list(flow_inputs.values())
+        except Exception:
+            return None
+
+        for candidate in values:
+            if candidate is not None and hasattr(candidate, "columns"):
+                return candidate
+
+        return None
+
+    input_df = resolve_input_frame(df, ["pys_discovery_node", "pys_dicovery_node", "Pys_dicovery_node"])
+    param_read_row = resolve_input_frame(df, ["tri_parametros_read", "Tri_parametros_read"])
 
     def get_param_read_value(param_source, field_name):
         if param_source is None:
@@ -60,6 +80,12 @@ def pyspark_transform(spark, df, param_dict):
     # Input Contract Resolver Pattern
     # Acepta distintos contratos de entrada para mantener compatibilidad
     # =====================================
+    if input_df is None or not hasattr(input_df, "columns"):
+        raise ValueError(
+            "No se encontró DataFrame de entrada para pys_read_normalize. "
+            "Verifique la salida de discovery y los nombres de nodos de entrada."
+        )
+
     input_cols = set(input_df.columns)
     if "path" in input_cols:
         files_df = input_df.selectExpr(
