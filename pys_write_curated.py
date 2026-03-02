@@ -47,8 +47,8 @@ def pyspark_transform(spark, df, param_dict):
 
         return None
 
-    input_df = resolve_input_frame(df, ["pys_read_normalize", "pys_read_normalize_node"])
-    param_df = resolve_input_frame(df, ["tri_parametros_write", "tri_parametros_read", "Tri_parametros_write"])
+    input_df = resolve_input_frame(df, ["pys_read_normalize_node"])
+    param_df = resolve_input_frame(df, ["tri_parametros_write"])
 
     if input_df is None or not hasattr(input_df, "columns"):
         raise ValueError(
@@ -83,13 +83,9 @@ def pyspark_transform(spark, df, param_dict):
 
     ruta_salida = (
         get_value_from_param_df(param_df, "RUTA_SALIDA")
-        or param_dict.get("RUTA_SALIDA")
-        or param_dict.get("ruta_salida")
     )
     nombre_tabla = (
         get_value_from_param_df(param_df, "NOMBRE_TABLA")
-        or param_dict.get("NOMBRE_TABLA")
-        or param_dict.get("nombre_tabla")
     )
 
     if is_missing(ruta_salida):
