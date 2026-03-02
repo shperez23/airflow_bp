@@ -25,7 +25,7 @@ def pyspark_transform(spark, df, param_dict):
             return False
         return default
 
-    include_skipped = get_bool_param("include_skipped", False)
+    include_skipped = get_bool_param("include_skipped", True)
     deduplicate_errors = get_bool_param("deduplicate_errors", True)
 
     # =====================================
