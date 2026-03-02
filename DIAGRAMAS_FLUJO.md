@@ -140,3 +140,27 @@ flowchart TD
     K --> L
     L --> M[Return DataFrame consolidado de errores]
 ```
+
+## 6) `pys_write_curated.py`
+
+```mermaid
+flowchart TD
+    A[Inicio pyspark_transform] --> B[Resolver input df y df de parámetros]
+    B --> C{Input válido?}
+    C -- No --> Z1[ValueError]
+    C -- Sí --> D[Validar existencia de errores en record_status]
+    D --> E{Hay errores?}
+    E -- Sí --> F[No escribir y retornar input]
+    E -- No --> G[Obtener RUTA_SALIDA y NOMBRE_TABLA]
+    G --> H{Parámetros completos?}
+    H -- No --> Z2[ValueError]
+    H -- Sí --> I[Agregar columnas write_ts/table_name]
+    I --> J[Escribir snapshot parquet en current]
+    J --> K[Construir history_df con execution_id]
+    K --> L{ENABLE_REPROCESS y history existente?}
+    L -- Sí --> M[Eliminar execution_id previo del Delta]
+    L -- No --> N[Continuar append]
+    M --> N
+    N --> O[Append en history_delta formato Delta]
+    O --> P[Retornar dataframe de control de escritura]
+```
