@@ -38,7 +38,9 @@ def pyspark_transform(spark, df, param_dict):
             return False
         return default
 
-    include_global_summary = get_bool_param("include_global_summary", True)
+    # Fila GLOBAL deshabilitada por defecto para no mezclar granularidad
+    # (dataset/batch) con snapshot agregado en la misma salida.
+    include_global_summary = get_bool_param("include_global_summary", False)
     # En etapa pre-write no existe evidencia de destino; por defecto se deja null.
     # Solo habilitar en modo espejo para validaciones transitorias de pipeline.
     use_source_checksum_as_destination = get_bool_param("use_source_checksum_as_destination", False)
