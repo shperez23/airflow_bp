@@ -6,7 +6,7 @@ from pyspark.sql.functions import (
     countDistinct,
     when,
     coalesce,
-    sha2,
+    hash,
     concat_ws,
     sort_array,
     collect_list,
@@ -38,8 +38,12 @@ def pyspark_transform(spark, df, param_dict):
             return False
         return default
 
-    include_global_summary = get_bool_param("include_global_summary", True)
-    use_source_checksum_as_destination = get_bool_param("use_source_checksum_as_destination", True)
+    # Fila GLOBAL deshabilitada por defecto para no mezclar granularidad
+    # (dataset/batch) con snapshot agregado en la misma salida.
+    include_global_summary = get_bool_param("include_global_summary", False)
+    # En etapa pre-write no existe evidencia de destino; por defecto se deja null.
+    # Solo habilitar en modo espejo para validaciones transitorias de pipeline.
+    use_source_checksum_as_destination = get_bool_param("use_source_checksum_as_destination", False)
 
     # =====================================
     # Input Contract Resolver Pattern
@@ -80,7 +84,7 @@ def pyspark_transform(spark, df, param_dict):
         business_cols = ["source_file"]
 
     row_fingerprint_cols = [coalesce(col(c).cast("string"), lit("")) for c in business_cols]
-    with_checksums = df.withColumn("row_checksum", sha2(concat_ws("||", *row_fingerprint_cols), 256))
+    with_checksums = df.withColumn("row_checksum", hash(concat_ws("||", *row_fingerprint_cols)).cast("long"))
 
     # =====================================
     # Audit-Write-Audit Pattern
@@ -96,15 +100,17 @@ def pyspark_transform(spark, df, param_dict):
             count(when(col("record_status").rlike("^ERROR"), True)).alias("cantidad_registros_error"),
             countDistinct("source_file").alias("cantidad_archivos"),
             first(when(col("record_status").rlike("^ERROR"), col("error_message")), ignorenulls=True).alias("error"),
-            sha2(concat_ws("||", sort_array(collect_list("row_checksum"))), 256).alias("checksum_source"),
+            hash(concat_ws("||", sort_array(collect_list("row_checksum")))).cast("long").alias("checksum_source"),
         )
         .withColumn("ingestion_summary_ts", current_timestamp())
     )
 
+    # Destination checksum debe calcularse después del writer (parquet/delta).
+    # Aquí solo permitimos modo espejo opcional para backward compatibility.
     if use_source_checksum_as_destination:
         summary = summary.withColumn("checksum_destination", col("checksum_source"))
     else:
-        summary = summary.withColumn("checksum_destination", lit(None).cast(StringType()))
+        summary = summary.withColumn("checksum_destination", lit(None).cast("long"))
 
     summary = summary.withColumn(
         "estado_ingesta",
@@ -136,8 +142,8 @@ def pyspark_transform(spark, df, param_dict):
             .withColumn("cantidad_registros_error", lit(None).cast("long"))
             .withColumn("cantidad_archivos", lit(None).cast("long"))
             .withColumn("error", lit(None).cast(StringType()))
-            .withColumn("checksum_source", lit(None).cast(StringType()))
-            .withColumn("checksum_destination", lit(None).cast(StringType()))
+            .withColumn("checksum_source", lit(None).cast("long"))
+            .withColumn("checksum_destination", lit(None).cast("long"))
             .select(summary.columns)
         )
 
