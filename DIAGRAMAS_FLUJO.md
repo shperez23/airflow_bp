@@ -93,7 +93,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Inicio pyspark_transform] --> B[Resolver input_df (pys_discovery_node) y tri_parametros_read]
+    A[Inicio pyspark_transform] --> B[Resolver input_df desde pys_discovery_node y tri_parametros_read]
     B --> C[Parsear READER_OPTIONS dict/JSON]
     C --> D{Input contiene columna path?}
     D -- No --> Z1[ValueError]
@@ -177,7 +177,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Inicio pyspark_transform] --> B[Resolver input_df y param_df (tri_parametros_write)]
+    A[Inicio pyspark_transform] --> B[Resolver input_df y param_df desde tri_parametros_write]
     B --> C{input_df válido?}
     C -- No --> Z1[ValueError]
     C -- Sí --> D[Error Interceptor: buscar record_status ERROR]
