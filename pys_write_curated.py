@@ -23,6 +23,7 @@ def pyspark_transform(spark, df, param_dict):
             return False
         return default
 
+
     # =====================================
     # Multi-Input Resolver Pattern
     # Resuelve entradas cuando el orquestador envía varios dataframes
@@ -74,19 +75,16 @@ def pyspark_transform(spark, df, param_dict):
             StructField("nombre_tabla", StringType(), True),
             StructField("ruta_current", StringType(), True),
             StructField("ruta_history_delta", StringType(), True),
-            StructField("execution_id", StringType(), True),
             StructField("enable_reprocess", StringType(), False),
             StructField("write_status", StringType(), False),
             StructField("write_message", StringType(), True),
         ])
 
-        execution_id = param_dict.get("execution_id") or param_dict.get("run_id")
         output_rows = [
             (
                 None,
                 None,
                 None,
-                None if execution_id is None else str(execution_id),
                 str(get_bool_param("ENABLE_REPROCESS", False)).lower(),
                 "SKIPPED_NO_DATA",
                 "pys_read_normalize_node no retornó registros; se omite escritura current/history",
@@ -110,6 +108,7 @@ def pyspark_transform(spark, df, param_dict):
             return param_source[field_name]
         except Exception:
             return None
+
 
     ruta_salida = (
         get_value_from_param_df(param_df, "RUTA_SALIDA")
@@ -152,8 +151,7 @@ def pyspark_transform(spark, df, param_dict):
     # Immutable Dataset Pattern
     # Conserva histórico por ejecución en Delta Lake
     # =====================================
-    execution_id = param_dict.get("execution_id") or param_dict.get("run_id")
-    history_df = df_with_audit.withColumn("execution_id", lit(execution_id).cast("string"))
+    history_df = df_with_audit
 
     history_exists = False
     try:
@@ -162,12 +160,12 @@ def pyspark_transform(spark, df, param_dict):
     except Exception:
         history_exists = False
 
-    if enable_reprocess and history_exists and execution_id is not None:
+    if enable_reprocess and history_exists:
         try:
             from delta.tables import DeltaTable
 
             delta_table = DeltaTable.forPath(spark, history_path)
-            delta_table.delete(col("execution_id") == lit(str(execution_id)))
+            delta_table.delete(lit(True))
         except Exception:
             history_df = history_df.filter(lit(True))
 
@@ -198,7 +196,6 @@ def pyspark_transform(spark, df, param_dict):
             )
             .dropDuplicates(["path"])
             .withColumn("checkpoint_ts", current_timestamp().cast("string"))
-            .withColumn("execution_id", lit(None if execution_id is None else str(execution_id)).cast("string"))
             .withColumn("writer_status", lit("WRITTEN"))
         )
 
@@ -213,7 +210,6 @@ def pyspark_transform(spark, df, param_dict):
         StructField("nombre_tabla", StringType(), False),
         StructField("ruta_current", StringType(), False),
         StructField("ruta_history_delta", StringType(), False),
-        StructField("execution_id", StringType(), True),
         StructField("enable_reprocess", StringType(), False),
         StructField("write_status", StringType(), False),
         StructField("write_message", StringType(), True),
@@ -224,7 +220,6 @@ def pyspark_transform(spark, df, param_dict):
             str(nombre_tabla),
             current_path,
             history_path,
-            None if execution_id is None else str(execution_id),
             str(enable_reprocess).lower(),
             "WRITTEN",
             None,
