@@ -254,7 +254,9 @@ def pyspark_transform(spark, df, param_dict):
                     {
                         "read_path": f"s3a://{staging_bucket}/{staged_key}",
                         "trace_path": trace_path,
-                        "source_file": trace_path,
+                        # Mantiene trazabilidad del archivo contenedor (ZIP) en source_file.
+                        # El path conserva el archivo interno procesado (zip::member).
+                        "source_file": path,
                     }
                 )
 
