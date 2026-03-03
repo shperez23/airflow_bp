@@ -106,7 +106,7 @@ flowchart TD
     J --> K[expand_input_paths]
     K --> L{Expansión OK?}
     L -- No --> M[Registrar ERROR_READ]
-    L -- Sí --> N[Iterar targets (path o miembros ZIP)]
+    L -- Sí --> N[Iterar targets path o miembros ZIP]
     N --> O[read_dynamic según ext y reader_options]
     O --> P{Lectura OK?}
     P -- No --> Q[Registrar ERROR_READ]
@@ -196,7 +196,7 @@ flowchart TD
     N --> P[Gestionar history Delta]
     O --> P
     P --> Q{history existe y ENABLE_REPROCESS?}
-    Q -- Sí --> R[Intentar limpiar history (DeltaTable.delete)]
+    Q -- Sí --> R[Intentar limpiar history con DeltaTable delete]
     Q -- No --> S[Continuar]
     R --> T[Append history delta]
     S --> T
