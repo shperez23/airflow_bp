@@ -66,6 +66,36 @@ def pyspark_transform(spark, df, param_dict):
         return input_df
 
     # =====================================
+    # Empty Payload Guard Pattern
+    # Evita escrituras innecesarias cuando read_normalize no produce registros
+    # =====================================
+    if input_df.limit(1).count() == 0:
+        output_schema = StructType([
+            StructField("nombre_tabla", StringType(), True),
+            StructField("ruta_current", StringType(), True),
+            StructField("ruta_history_delta", StringType(), True),
+            StructField("execution_id", StringType(), True),
+            StructField("enable_reprocess", StringType(), False),
+            StructField("write_status", StringType(), False),
+            StructField("write_message", StringType(), True),
+        ])
+
+        execution_id = param_dict.get("execution_id") or param_dict.get("run_id")
+        output_rows = [
+            (
+                None,
+                None,
+                None,
+                None if execution_id is None else str(execution_id),
+                str(get_bool_param("ENABLE_REPROCESS", False)).lower(),
+                "SKIPPED_NO_DATA",
+                "pys_read_normalize_node no retornó registros; se omite escritura current/history",
+            )
+        ]
+
+        return spark.createDataFrame(output_rows, output_schema)
+
+    # =====================================
     # External Trigger Pattern
     # Permite recibir parámetros por df de parametría o por param_dict
     # =====================================
@@ -150,6 +180,8 @@ def pyspark_transform(spark, df, param_dict):
         StructField("ruta_history_delta", StringType(), False),
         StructField("execution_id", StringType(), True),
         StructField("enable_reprocess", StringType(), False),
+        StructField("write_status", StringType(), False),
+        StructField("write_message", StringType(), True),
     ])
 
     output_rows = [
@@ -159,6 +191,8 @@ def pyspark_transform(spark, df, param_dict):
             history_path,
             None if execution_id is None else str(execution_id),
             str(enable_reprocess).lower(),
+            "WRITTEN",
+            None,
         )
     ]
 
