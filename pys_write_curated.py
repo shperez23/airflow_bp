@@ -176,11 +176,6 @@ def pyspark_transform(spark, df, param_dict):
     # Registra paths exitosos para que discovery no reprocese archivos ya escritos
     # =====================================
     checkpoint_prefix = param_dict.get("checkpoint_prefix")
-    if is_missing(checkpoint_prefix):
-        checkpoint_prefix = param_dict.get("CHECKPOINT_PREFIX")
-
-    if is_missing(bucket_raw):
-        bucket_raw = param_dict.get("BUCKET_RAW")
 
     if (not is_missing(bucket_raw)) and (not is_missing(checkpoint_prefix)):
         checkpoint_path = f"s3a://{str(bucket_raw).strip('/')}/{str(checkpoint_prefix).strip('/')}"
