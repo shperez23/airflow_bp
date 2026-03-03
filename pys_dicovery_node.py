@@ -1,3 +1,6 @@
+from pyspark.sql.functions import col
+
+
 def pyspark_transform(spark, df, param_dict):
 
     # =====================================
@@ -131,7 +134,30 @@ def pyspark_transform(spark, df, param_dict):
     checkpoint_path = f"s3a://{bucket_raw}/{checkpoint_prefix}"
 
     try:
-        processed = spark.read.parquet(checkpoint_path).select("path").distinct()
+        processed_raw = spark.read.parquet(checkpoint_path)
+        processed_cols = set(processed_raw.columns)
+
+        # =====================================
+        # Checkpoint Contract Adapter Pattern
+        # Acepta checkpoint antiguo (solo path) y nuevo (path + source_file)
+        # =====================================
+        processed_candidates = []
+
+        if "path" in processed_cols:
+            processed_candidates.append(processed_raw.select(col("path").cast("string").alias("path")))
+
+        if "source_file" in processed_cols:
+            processed_candidates.append(processed_raw.select(col("source_file").cast("string").alias("path")))
+
+        if not processed_candidates:
+            processed = spark.createDataFrame([], "path string")
+        else:
+            processed = processed_candidates[0]
+            for candidate in processed_candidates[1:]:
+                processed = processed.unionByName(candidate, allowMissingColumns=True)
+
+            processed = processed.where(col("path").isNotNull() & (col("path") != "")).distinct()
+
         pending = pending.join(processed, "path", "left_anti")
     except Exception:
         pending = pending.distinct()
