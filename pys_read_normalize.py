@@ -110,7 +110,7 @@ def pyspark_transform(spark, df, param_dict):
     if "path" in input_cols:
         files_df = input_df.selectExpr(
             "path",
-            "coalesce(discovery_status, 'PENDING') as status",
+            "coalesce(discovery_status, 'PENDIENTE') as status",
             "error_message",
             "coalesce(source_file, path) as source_file"
         )
@@ -118,10 +118,10 @@ def pyspark_transform(spark, df, param_dict):
         raise ValueError("El input de pys_read_normalize debe incluir la columna 'path'")
 
     file_rows = files_df.distinct().collect()
-    files = [r.path for r in file_rows if not is_missing(r.path) and (r.status == "PENDING")]
+    files = [r.path for r in file_rows if not is_missing(r.path) and (r.status == "PENDIENTE")]
     inherited_errors = [
         r for r in file_rows
-        if (str(r.status).upper().startswith("ERROR")) and (r.status != "PENDING")
+        if (str(r.status).upper().startswith("ERROR")) and (r.status != "PENDIENTE")
     ]
 
     # =====================================
@@ -369,7 +369,7 @@ def pyspark_transform(spark, df, param_dict):
         inferred_dataset = dataset_name(src_file) if src_file else None
         error_records.append((
             src_file,
-            "ERROR_UPSTREAM",
+            "ERROR_AGUAS_ARRIBA",
             inherited.error_message or inherited.status or "Error heredado desde upstream",
             None,
             src_file,
@@ -385,7 +385,7 @@ def pyspark_transform(spark, df, param_dict):
             dset = dataset_name(file)
             error_records.append((
                 file,
-                "ERROR_READ",
+                "ERROR_LECTURA",
                 sanitize_error_message(exc),
                 None,
                 file,
@@ -402,7 +402,7 @@ def pyspark_transform(spark, df, param_dict):
             except Exception as exc:
                 error_records.append((
                     target["trace_path"],
-                    "ERROR_READ",
+                    "ERROR_LECTURA",
                     sanitize_error_message(exc),
                     None,
                     target["source_file"],
@@ -461,7 +461,7 @@ def pyspark_transform(spark, df, param_dict):
         error_df = spark.createDataFrame(error_records, error_schema)
         error_df = (
             error_df
-            .withColumn("error_stage", lit("READ_NORMALIZE"))
+            .withColumn("error_stage", lit("LECTURA_NORMALIZACION"))
             .withColumn("source_file", col("source_file").cast("string"))
         )
 

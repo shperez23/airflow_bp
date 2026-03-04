@@ -236,7 +236,7 @@ def pyspark_transform(spark, df, param_dict):
                     else:
                         files.append(full)
             except Exception as exc:
-                resultados.append((current_dir, "", "ERROR_DISCOVERY", "DISCOVERY", sanitize_error_message(exc)))
+                resultados.append((current_dir, "", "ERROR_DESCUBRIMIENTO", "DESCUBRIMIENTO", sanitize_error_message(exc)))
                 continue
 
         return files
@@ -309,7 +309,7 @@ def pyspark_transform(spark, df, param_dict):
                 # =====================================
                 signature = (rel_path, int(size1), int(mtime1))
                 if signature in processed_signatures:
-                    resultados.append((remoto, "", "SKIPPED_ALREADY_PROCESSED", "UPLOAD", "Archivo ya procesado por checkpoint de metadata"))
+                    resultados.append((remoto, "", "OMITIDO_YA_PROCESADO", "CARGA", "Archivo ya procesado por checkpoint de metadata"))
                     continue
 
                 file_age_seconds = int(time.time()) - int(mtime1)
@@ -320,7 +320,7 @@ def pyspark_transform(spark, df, param_dict):
                     size2 = size1
 
                 if size1 != size2 or size1 == 0:
-                    resultados.append((remoto, "", "SKIPPED_NOT_READY", "READINESS", "Archivo en copia activa o vacío"))
+                    resultados.append((remoto, "", "OMITIDO_NO_LISTO", "LISTO_PARA_LECTURA", "Archivo en copia activa o vacío"))
                     continue
 
                 # =====================================
@@ -337,7 +337,7 @@ def pyspark_transform(spark, df, param_dict):
 
                 if hash_value in processed_hashes:
                     os.remove(tmp_file)
-                    resultados.append((remoto, "", "SKIPPED_ALREADY_PROCESSED", "UPLOAD", "Archivo ya procesado por hash"))
+                    resultados.append((remoto, "", "OMITIDO_YA_PROCESADO", "CARGA", "Archivo ya procesado por hash"))
                     continue
 
                 # =====================================
@@ -381,7 +381,7 @@ def pyspark_transform(spark, df, param_dict):
                 processed_hashes.add(hash_value)
                 processed_signatures.add(signature)
 
-                resultados.append((remoto, s3_key, "PROCESADO", "UPLOAD", ""))
+                resultados.append((remoto, s3_key, "PROCESADO", "CARGA", ""))
 
                 os.remove(tmp_file)
 
@@ -395,7 +395,7 @@ def pyspark_transform(spark, df, param_dict):
                     s3.upload_file(tmp_file, bucket_name, f"{QUARANTINE}{rel_path}", Config=transfer_config)
                     os.remove(tmp_file)
 
-                resultados.append((remoto, "", "ERROR_UPLOAD", "UPLOAD", sanitize_error_message(e)))
+                resultados.append((remoto, "", "ERROR_CARGA", "CARGA", sanitize_error_message(e)))
 
     # =====================================
     # Batched Checkpointer Pattern
