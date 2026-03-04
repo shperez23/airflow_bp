@@ -96,6 +96,24 @@ def pyspark_transform(spark, df, param_dict):
     def append_log(log_list, log_str):
         log_list.append(f"{get_fecha_str()} {log_str}")
 
+    def path_exists(path):
+        try:
+            hadoop_path = spark._jvm.org.apache.hadoop.fs.Path(path)
+            hadoop_conf = spark._jsc.hadoopConfiguration()
+            file_system = hadoop_path.getFileSystem(hadoop_conf)
+            return file_system.exists(hadoop_path)
+        except Exception:
+            return False
+
+    def is_delta_path(path):
+        try:
+            return spark._jvm.io.delta.tables.DeltaTable.isDeltaTable(
+                spark._jsparkSession,
+                path,
+            )
+        except Exception:
+            return path_exists(f"{path}/_delta_log")
+
     def get_row_value(row, field_name, default=None):
         if hasattr(row, "asDict"):
             return row.asDict().get(field_name, default)
@@ -166,6 +184,14 @@ def pyspark_transform(spark, df, param_dict):
             )
 
     def casteo_destino(df_source, target_location, tipo_formato, log_list):
+        if not path_exists(target_location):
+            append_log(log_list, "Aplicar Cast Destino omitido, destino aún no existe")
+            return df_source
+
+        if tipo_formato == "delta" and not is_delta_path(target_location):
+            append_log(log_list, "Aplicar Cast Destino omitido, destino no es Delta")
+            return df_source
+
         try:
             target_schema = (
                 spark.read.format(f"{tipo_formato}").load(f"{target_location}").schema
