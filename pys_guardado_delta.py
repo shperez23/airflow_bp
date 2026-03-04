@@ -13,7 +13,7 @@
 #   22/07/2025      ezapatap   Codigo optimizado para:
 #                               Evitar desbordamiento de memoria
 #                               Suffle excesivo (total de líneas 502)
-#   04/Mar/2026     codex      Refactor de mantenibilidad y performance
+#   04/Mar/2026     sperezpe      Refactor de mantenibilidad y performance
 # =================================================================================
 
 from datetime import datetime
