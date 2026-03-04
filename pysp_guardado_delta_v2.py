@@ -50,11 +50,9 @@ def pyspark_transform(spark, df, param_dict):
 
         return None
 
-    def is_missing(value):
-        return value is None or (isinstance(value, str) and value.strip() == "")
 
     input_df = resolve_input_frame(df, ["pys_lectura_normalizacion"])
-    params_df = resolve_input_frame(df, ["tri_parametros_write"])
+    params_df = resolve_input_frame(df, ["tri_parametros_write", "Tri_parametros_write"])
 
     if params_df is None:
         params_df = df
@@ -405,10 +403,7 @@ def pyspark_transform(spark, df, param_dict):
         }
 
         try:
-            df0 = input_df
-            if not is_missing(row.p_condicion_delta):
-                df0 = df0.filter(str(row.p_condicion_delta))
-            df0 = df0.persist()
+            df0 = input_df.persist()
 
             if df0.take(1):
                 append_log(log_control_list, "Leído")
