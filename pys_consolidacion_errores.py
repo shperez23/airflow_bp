@@ -34,9 +34,9 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     flow_inputs = df if hasattr(df, "get") else {}
 
-    upload_df = flow_inputs.get("pys_upload") if hasattr(flow_inputs, "get") else None
-    discovery_df = flow_inputs.get("pys_discovery_node") if hasattr(flow_inputs, "get") else None
-    read_df = flow_inputs.get("pys_read_normalize_node") if hasattr(flow_inputs, "get") else None
+    upload_df = flow_inputs.get("pys_subida_archivos") if hasattr(flow_inputs, "get") else None
+    discovery_df = flow_inputs.get("pys_descubrimiento_archivos") if hasattr(flow_inputs, "get") else None
+    read_df = flow_inputs.get("pys_lectura_normalizacion") if hasattr(flow_inputs, "get") else None
 
     if not hasattr(df, "get"):
         input_cols = set(df.columns)
@@ -87,7 +87,7 @@ def pyspark_transform(spark, df, param_dict):
                 lit(None).cast("string").alias("path"),
                 lit(None).cast("string").alias("dataset"),
                 lit(None).cast("string").alias("batch_id"),
-                lit("pys_upload").alias("error_origin"),
+                lit("pys_subida_archivos").alias("error_origin"),
             )
         )
 
@@ -111,7 +111,7 @@ def pyspark_transform(spark, df, param_dict):
                 col("path").cast("string").alias("path"),
                 lit(None).cast("string").alias("dataset"),
                 lit(None).cast("string").alias("batch_id"),
-                lit("pys_discovery_node").alias("error_origin"),
+                lit("pys_descubrimiento_archivos").alias("error_origin"),
             )
         )
 

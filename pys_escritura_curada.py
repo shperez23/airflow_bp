@@ -48,13 +48,13 @@ def pyspark_transform(spark, df, param_dict):
 
         return None
 
-    input_df = resolve_input_frame(df, ["pys_read_normalize_node"])
+    input_df = resolve_input_frame(df, ["pys_lectura_normalizacion"])
     param_df = resolve_input_frame(df, ["tri_parametros_write"])
 
     if input_df is None or not hasattr(input_df, "columns"):
         raise ValueError(
             "No se encontró DataFrame de entrada para escritura. "
-            "Verifique la salida de pys_read_normalize_node."
+            "Verifique la salida de pys_lectura_normalizacion."
         )
 
     # =====================================
@@ -87,7 +87,7 @@ def pyspark_transform(spark, df, param_dict):
                 None,
                 str(get_bool_param("ENABLE_REPROCESS", False)).lower(),
                 "OMITIDO_SIN_DATOS",
-                "pys_read_normalize_node no retornó registros; se omite escritura current/history",
+                "pys_lectura_normalizacion no retornó registros; se omite escritura current/history",
             )
         ]
 

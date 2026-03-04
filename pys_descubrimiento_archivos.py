@@ -31,7 +31,7 @@ def pyspark_transform(spark, df, param_dict):
     # Multi-Input Resolver Pattern
     # Resuelve entradas cuando el orquestador envía múltiples dataframes
     # =====================================
-    upload_df = df.get("pys_upload") if hasattr(df, "get") else df
+    upload_df = df.get("pys_subida_archivos") if hasattr(df, "get") else df
     param_discovery_row = df.get("tri_parametros_discovery") if hasattr(df, "get") else None
 
     def get_param_discovery_value(param_source, field_name):
@@ -51,7 +51,7 @@ def pyspark_transform(spark, df, param_dict):
 
     # =====================================
     # Upload Result Contract Pattern
-    # Detecta si el input proviene del nodo pys_upload (columnas de resultado)
+    # Detecta si el input proviene del nodo pys_subida_archivos (columnas de resultado)
     # =====================================
     input_cols = set(upload_df.columns)
     has_upload_contract = {"full_path", "s3_key", "status"}.issubset(input_cols)

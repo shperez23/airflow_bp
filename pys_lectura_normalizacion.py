@@ -60,7 +60,7 @@ def pyspark_transform(spark, df, param_dict):
 
         return None
 
-    input_df = resolve_input_frame(df, ["pys_discovery_node"])
+    input_df = resolve_input_frame(df, ["pys_descubrimiento_archivos"])
     param_read_row = resolve_input_frame(df, ["tri_parametros_read", "Tri_parametros_read"])
     def get_param_read_value(param_source, field_name):
         if param_source is None:
