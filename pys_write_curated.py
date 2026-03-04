@@ -86,7 +86,7 @@ def pyspark_transform(spark, df, param_dict):
                 None,
                 None,
                 str(get_bool_param("ENABLE_REPROCESS", False)).lower(),
-                "SKIPPED_NO_DATA",
+                "OMITIDO_SIN_DATOS",
                 "pys_read_normalize_node no retornó registros; se omite escritura current/history",
             )
         ]
@@ -191,7 +191,7 @@ def pyspark_transform(spark, df, param_dict):
             )
             .dropDuplicates(["path"])
             .withColumn("checkpoint_ts", current_timestamp().cast("string"))
-            .withColumn("writer_status", lit("WRITTEN"))
+            .withColumn("writer_status", lit("ESCRITO"))
         )
 
         if checkpoint_base.limit(1).count() > 0:
@@ -216,7 +216,7 @@ def pyspark_transform(spark, df, param_dict):
             current_path,
             history_path,
             str(enable_reprocess).lower(),
-            "WRITTEN",
+            "ESCRITO",
             None,
         )
     ]

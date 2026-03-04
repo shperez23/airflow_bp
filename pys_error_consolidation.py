@@ -73,14 +73,14 @@ def pyspark_transform(spark, df, param_dict):
 
         valid_status_expr = col("status").rlike("^ERROR")
         if include_skipped:
-            valid_status_expr = col("status").rlike("^(ERROR|SKIPPED)")
+            valid_status_expr = col("status").rlike("^(ERROR|OMITIDO)")
 
         return (
             stage_df
             .where(valid_status_expr)
             .select(
                 lit(None).cast("string").alias("error_consolidation_ts"),
-                lit("UPLOAD").alias("flow_stage"),
+                lit("CARGA").alias("flow_stage"),
                 col("status").cast("string").alias("error_code"),
                 coalesce(col("error_message").cast("string"), col("status").cast("string")).alias("error_message"),
                 col("full_path").cast("string").alias("source_file"),
@@ -97,14 +97,14 @@ def pyspark_transform(spark, df, param_dict):
 
         valid_status_expr = col("discovery_status").rlike("^ERROR")
         if include_skipped:
-            valid_status_expr = col("discovery_status").rlike("^(ERROR|SKIPPED)")
+            valid_status_expr = col("discovery_status").rlike("^(ERROR|OMITIDO)")
 
         return (
             stage_df
             .where(valid_status_expr)
             .select(
                 lit(None).cast("string").alias("error_consolidation_ts"),
-                lit("DISCOVERY").alias("flow_stage"),
+                lit("DESCUBRIMIENTO").alias("flow_stage"),
                 col("discovery_status").cast("string").alias("error_code"),
                 coalesce(col("error_message").cast("string"), col("discovery_status").cast("string")).alias("error_message"),
                 col("source_file").cast("string").alias("source_file"),
@@ -124,7 +124,7 @@ def pyspark_transform(spark, df, param_dict):
             .where(col("record_status").rlike("^ERROR"))
             .select(
                 lit(None).cast("string").alias("error_consolidation_ts"),
-                coalesce(col("error_stage").cast("string"), lit("READ_NORMALIZE")).alias("flow_stage"),
+                coalesce(col("error_stage").cast("string"), lit("LECTURA_NORMALIZACION")).alias("flow_stage"),
                 col("record_status").cast("string").alias("error_code"),
                 coalesce(col("error_message").cast("string"), col("record_status").cast("string")).alias("error_message"),
                 col("source_file").cast("string").alias("source_file"),

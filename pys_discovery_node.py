@@ -73,7 +73,7 @@ def pyspark_transform(spark, df, param_dict):
             .where((upload_df.status == "PROCESADO") & (upload_df.s3_key.isNotNull()) & (upload_df.s3_key != ""))
             .selectExpr(
                 f"concat('s3a://{bucket_blob}/', s3_key) as path",
-                "'PENDING' as discovery_status",
+                "'PENDIENTE' as discovery_status",
                 "cast(null as string) as error_message",
                 f"concat('s3a://{bucket_blob}/', s3_key) as source_file"
             )
@@ -83,7 +83,7 @@ def pyspark_transform(spark, df, param_dict):
         if include_upload_errors:
             upload_errors_df = upload_df.where((upload_df.status != "PROCESADO") & upload_df.status.rlike("^ERROR"))
             if include_upload_skipped:
-                upload_errors_df = upload_df.where((upload_df.status != "PROCESADO") & (upload_df.status.rlike("^ERROR") | upload_df.status.rlike("^SKIPPED")))
+                upload_errors_df = upload_df.where((upload_df.status != "PROCESADO") & (upload_df.status.rlike("^ERROR") | upload_df.status.rlike("^OMITIDO")))
 
             upload_errors = (
                 upload_errors_df
@@ -115,7 +115,7 @@ def pyspark_transform(spark, df, param_dict):
             spark.read
             .format("binaryFile")
             .load(raw_path)
-            .selectExpr("path", "'PENDING' as discovery_status", "cast(null as string) as error_message", "path as source_file")
+            .selectExpr("path", "'PENDIENTE' as discovery_status", "cast(null as string) as error_message", "path as source_file")
             .distinct()
         )
         upload_errors = None
