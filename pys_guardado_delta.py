@@ -13,153 +13,230 @@
 #   22/07/2025      ezapatap   Codigo optimizado para:
 #                               Evitar desbordamiento de memoria
 #                               Suffle excesivo (total de líneas 502)
+#   04/Mar/2026     codex      Refactor de mantenibilidad y performance
 # =================================================================================
 
 from datetime import datetime
-from pyspark.sql.functions import lit
+
 import pytz
+from pyspark.sql.functions import lit
 
 
 def pyspark_transform(spark, df, param_dict):
     # habilitar sobreescritura por particion
     spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
-    ingest = {}
-    log_control_list = []
 
+    # =====================================
+    # Parameter Guard Pattern
+    # =====================================
+    aplica_md5 = str(param_dict.get("calcula_md5", "0")) == "1"
+
+    # =====================================
+    # Utility Functions
+    # =====================================
     def get_fecha_sql():
         return spark.sql(
             "SELECT from_utc_timestamp(CURRENT_TIMESTAMP(), 'America/Guayaquil') as fecha"
         ).collect()[0][0]
 
-    def get_fecha():
-        # now = datetime.now().astimezone(timezone("America/Guayaquil"))
+    def get_fecha_str(str_format="%Y-%m-%d %H:%M:%S.%f"):
         tz = pytz.timezone("America/Guayaquil")
         now = datetime.now(tz)
-        return now
+        return str(now.strftime(str_format))
 
-    def get_fecha_str(str_format="%Y-%m-%d %H:%M:%S.%f"):
-        return str(get_fecha().strftime(str_format))
+    def append_log(log_list, log_str):
+        log_list.append(f"{get_fecha_str()} {log_str}")
 
-    def append_log(log_str):
-        ingest["log_control"] = log_str
-        log_control_list.append(get_fecha_str() + " " + log_str)
+    def default_ingest_record():
+        fecha_actual = get_fecha_sql()
+        return {
+            "id_ingesta": "",
+            "fecha_inicio": fecha_actual,
+            "estado": "INICIADO",
+            "fecha_fin": fecha_actual,
+            "cantidad_insertados": 0,
+            "error": "",
+            "rango_ini_procesado": "",
+            "rango_fin_procesado": "",
+            "id_control": 0,
+            "punto_control": "",
+            "p_columna_delta_tipo_dato": "",
+            "log_control": "",
+            "log1": "",
+            "error1": "",
+            "checksum_source": 0,
+            "checksum_destination": 0,
+            "cantidad_leidos": 0,
+            "is_stock_delta": 0,
+            "log_detail": "",
+            "coleccion_salida": "",
+            "nombre_tabla": "",
+            "root_metada_path": "",
+            "tiene_shist": "0",
+            "objeto_existe": 0,
+        }
 
-    def save_delta_partition(
-        df_write, p_replace_where, p_target_location, partition="periodo"
-    ):
+    def save_delta_partition(df_write, replace_where, target_location):
         try:
-            df_write.write.format("delta").mode("overwrite").partitionBy(
-                "periodo"
-            ).option("mergeSchema", "true").option(
-                "replaceWhere", p_replace_where
-            ).save(
-                p_target_location
+            (
+                df_write.write.format("delta")
+                .mode("overwrite")
+                .partitionBy("periodo")
+                .option("mergeSchema", "true")
+                .option("replaceWhere", replace_where)
+                .save(target_location)
             )
-        except Exception as error_write:
-            append_log("Guardar delta por partición, " + str(error_write))
-            # obtener rango de periodos desde la fuente
+        except Exception:
+            # fallback para periodos no alineados con replaceWhere entrante
             row_per = df_write.selectExpr(
                 "date_format(min(periodo),'yyyy-MM-dd') as rango_ini",
                 "date_format(max(periodo),'yyyy-MM-dd') as rango_fin",
             ).collect()[0]
-            p_star = row_per.rango_ini
-            p_end = row_per.rango_fin
-            p_replace_where = f"periodo between '{p_star}' and '{p_end}'"
-            # reintentar
-            df_write.write.format("delta").mode("overwrite").partitionBy(
-                "periodo"
-            ).option("mergeSchema", "true").option(
-                "replaceWhere", p_replace_where
-            ).save(
-                p_target_location
+            fallback_where = f"periodo between '{row_per.rango_ini}' and '{row_per.rango_fin}'"
+            (
+                df_write.write.format("delta")
+                .mode("overwrite")
+                .partitionBy("periodo")
+                .option("mergeSchema", "true")
+                .option("replaceWhere", fallback_where)
+                .save(target_location)
             )
 
-    def get_checksum(df, source):
-        if source == 0:
-            df = df.selectExpr(hash_expr).persist()
-        # obtiene la suma de hash de todos los registros
-        df_result = df.selectExpr("SUM(ingesta_hash) AS suma_hash")
-        hash_value = df_result.collect()[0][0]
-        return hash_value
-
-    def casteo_destino(df, p_target_location, tipo_formato):
+    def casteo_destino(df_source, target_location, tipo_formato, log_list):
         try:
-            cast_expr = []
             target_schema = (
-                spark.read.format(f"{tipo_formato}").load(f"{p_target_location}").schema
+                spark.read.format(f"{tipo_formato}").load(f"{target_location}").schema
             )
-
-            # captura esquema entrasa
-            input_schema = df.schema
-            # convertir a diccionario
-            target_dict = {}
-            for col in target_schema:
-                col_name = (col.name).lower()
-                target_dict[col_name] = col.dataType.simpleString()
-            # Crear expresion de cast
-            for col in input_schema:
-                source_name = col.name
-                source_type = col.dataType.simpleString()
+            target_dict = {
+                col.name.lower(): col.dataType.simpleString() for col in target_schema
+            }
+            cast_expr = []
+            for source_col in df_source.schema:
+                source_name = source_col.name
+                source_type = source_col.dataType.simpleString()
                 target_type = target_dict.get(source_name.lower())
                 if target_type is not None and target_type != source_type:
-                    cast_expr.append(
-                        f"CAST({source_name} AS {target_type}) AS {source_name}"
-                    )
+                    cast_expr.append(f"CAST({source_name} AS {target_type}) AS {source_name}")
                 else:
                     cast_expr.append(source_name)
-            # aplicar casteo
-            df = df.selectExpr(*cast_expr)
-            append_log("Aplicar Cast Destino")
 
+            append_log(log_list, "Aplicar Cast Destino")
+            return df_source.selectExpr(*cast_expr)
         except Exception as err_cast:
-            append_log("Aplicar Cast Destino, " + str(err_cast))
-            # cast_expr = ["*"]
-        return df
+            append_log(log_list, f"Aplicar Cast Destino, {err_cast}")
+            return df_source
 
-    ingest_rows = df.collect()
-    ingest_list = []
-    # registro base, en caso de no tener datos
-    ingest_model = {
-        "id_ingesta": "",
-        "fecha_inicio": get_fecha_sql(),
-        "estado": "INICIADO",
-        "fecha_fin": get_fecha_sql(),
-        "cantidad_insertados": 0,
-        "error": "",
-        "rango_ini_procesado": "",
-        "rango_fin_procesado": "",
-        "id_control": 0,
-        "punto_control": "",
-        "p_columna_delta_tipo_dato": "",
-        "log_control": "",
-        "log1": "",
-        "error1": "",
-        "checksum_source": 0,
-        "checksum_destination": 0,
-        "cantidad_leidos": 0,
-        "is_stock_delta": 0,
-        "log_detail": "",
-        "coleccion_salida": "",
-        "nombre_tabla": "",
-        "root_metada_path": "",
-        "tiene_shist": "0",
-        "objeto_existe": 0,
-    }
-    ingest_list.append(ingest_model)
-    # recorrer grupo de ingesta
-    for row in ingest_rows:
-        row_dict1 = row.asDict()
-        append_log("Inicio")
-        coleccion_salida = row_dict1.get("coleccion_salida")
-        nombre_tabla = row.p_nombre_tabla
-        # verificar  objeto existe
+    def build_hash_expressions(df_base):
+        coalesce_expr = "(" + "".join(
+            [f",COALESCE(STRING({col.name}), '')" for col in df_base.schema]
+        )
+        hash_expr = coalesce_expr.replace("(,", "hash(CONCAT(") + ")) as ingesta_hash"
+        hash_expr = hash_expr.replace("COALESCE(STRING(PARTICION_LECTURA), ''),", "")
+
+        md5_expr = coalesce_expr.replace("(,", "md5(CONCAT(") + ")) as ingesta_md5"
+        return hash_expr, md5_expr
+
+    def checksum_from_hash(df_input, hash_expr=None):
+        work_df = df_input
+        if "ingesta_hash" not in work_df.columns:
+            if hash_expr is None:
+                return 0
+            work_df = work_df.selectExpr(hash_expr)
+
+        checksum_row = work_df.selectExpr("SUM(ingesta_hash) AS suma_hash").collect()[0]
+        return checksum_row.suma_hash if checksum_row.suma_hash is not None else 0
+
+    def get_objeto_existe(coleccion_salida, nombre_tabla, log_list):
         try:
-            objeto_existe = spark.sql(
-                f"SHOW TABLES FROM  {coleccion_salida}   like  '{nombre_tabla}'"
+            return spark.sql(
+                f"SHOW TABLES FROM {coleccion_salida} like '{nombre_tabla}'"
             ).count()
         except Exception as error_tb:
-            append_log("Verificar, colección y tabla delta, " + str(error_tb))
-            objeto_existe = 0
+            append_log(log_list, f"Verificar, colección y tabla delta, {error_tb}")
+            return 0
+
+    def process_stock_delta(df_new, target_location, new_periodo, old_periodo, log_list):
+        df_new.createOrReplaceTempView("new")
+        df_old = spark.read.format("parquet").load(target_location)
+        df_old.createOrReplaceTempView("old")
+
+        delta_count = 0
+        previous_delta = ""
+        try:
+            previous_delta = (
+                spark.read.parquet(f"{target_location}_sdelta")
+                .selectExpr("STRING(MAX(periodo)) as periodo")
+                .collect()[0][0]
+                or ""
+            )
+        except Exception as error_delta:
+            append_log(log_list, f"Verificar, Delta anterior, {error_delta}")
+
+        append_log(log_list, f"Periodo Ultimo Delta: {previous_delta}")
+
+        if previous_delta != "":
+            df_delta = (
+                spark.sql(
+                    f"""SELECT
+                        CASE
+                            WHEN N.SDELTA_ID IS NOT NULL THEN STRUCT(N.*)
+                            ELSE STRUCT(O.*)
+                        END datos,
+                        CASE
+                            WHEN N.SDELTA_ID IS NOT NULL AND O.SDELTA_ID IS NOT NULL THEN 'U'
+                            WHEN N.SDELTA_ID IS NOT NULL AND O.SDELTA_ID IS NULL THEN 'I'
+                            WHEN N.SDELTA_ID IS NULL AND O.SDELTA_ID IS NOT NULL THEN 'D'
+                            ELSE '-'
+                        END as sdelta_operacion
+                    FROM new N
+                    FULL OUTER JOIN old O ON (N.SDELTA_ID = O.SDELTA_ID)
+                    WHERE '{new_periodo}' >= '{old_periodo}'
+                    AND coalesce(N.ingesta_md5, '-') != coalesce(O.ingesta_md5, '-')
+                    """
+                )
+                .selectExpr(
+                    "datos.*",
+                    "sdelta_operacion",
+                    f"'{old_periodo}' as sdelta_periodo_compararacion",
+                )
+                .withColumn("periodo", lit(new_periodo))
+            )
+            delta_count = df_delta.count()
+            append_log(log_list, f"Conteo delta {delta_count}")
+
+            if delta_count > 0:
+                write_mode = "append" if previous_delta == new_periodo else "overwrite"
+                df_delta.write.partitionBy("periodo").mode(write_mode).parquet(
+                    f"{target_location}_sdelta"
+                )
+                append_log(log_list, f"Escritura delta modo {write_mode}")
+
+        if delta_count == 0 and previous_delta == "":
+            df_delta0 = df_new.selectExpr(
+                "*",
+                "'I' as sdelta_operacion",
+                "'' as sdelta_periodo_compararacion",
+            )
+            df_delta0.write.partitionBy("periodo").mode("overwrite").parquet(
+                f"{target_location}_sdelta"
+            )
+            append_log(log_list, f"Escritura primera vez, {target_location}_sdelta")
+
+    ingest_list = [default_ingest_record()]
+
+    # =====================================
+    # Streaming Iterator Pattern
+    # Evita uso de collect() para reducir presión de memoria en driver
+    # =====================================
+    for row in df.toLocalIterator():
+        row_dict = row.asDict()
+        log_control_list = []
+        append_log(log_control_list, "Inicio")
+
+        coleccion_salida = row_dict.get("coleccion_salida")
+        nombre_tabla = row.p_nombre_tabla
+        p_target_location = f"{row.p_ruta_salida}/{row.p_nombre_tabla}"
+        objeto_existe = get_objeto_existe(coleccion_salida, nombre_tabla, log_control_list)
 
         ingest = {
             "id_ingesta": row.p_id_ingesta,
@@ -183,25 +260,19 @@ def pyspark_transform(spark, df, param_dict):
             "log_detail": "",
             "coleccion_salida": coleccion_salida,
             "nombre_tabla": nombre_tabla,
-            "root_metada_path": row_dict1.get("root_metada_path"),
+            "root_metada_path": row_dict.get("root_metada_path"),
             "tiene_shist": str(row.p_requiere_shist),
             "objeto_existe": objeto_existe,
         }
 
-        # leer tabla
         try:
-            query = row.p_query_consulta + " " + row.p_condicion_delta
-            # persistir consulta base
+            query = f"{row.p_query_consulta} {row.p_condicion_delta}"
             df0 = spark.sql(query).persist()
 
-            if df.take(1):
-                append_log("Leído")
-                p_replace_where = row.p_condicion_reproceso
+            if df0.take(1):
+                append_log(log_control_list, "Leído")
+                ingest["cantidad_leidos"] = df0.count()
 
-                # contar registros origen
-                row_sum_o = df0.selectExpr("count(1) as cantidad_leidos").collect()[0]
-                ingest["cantidad_leidos"] = row_sum_o.cantidad_leidos
-                # quitar columnas de control
                 drop_list = [
                     "periodo",
                     "Periodo",
@@ -217,233 +288,118 @@ def pyspark_transform(spark, df, param_dict):
                     "ingesta_hash",
                     "ingesta_md5",
                 ]
-
                 df1 = df0.drop(*drop_list)
-                append_log("Eliminar columnas de control")
+                append_log(log_control_list, "Eliminar columnas de control")
 
-                # expresion calcular hash
-                target_schema = df1.schema
-                coalesce_expr = "("
-                for col in target_schema:
-                    col_name = col.name
-                    coalesce_expr = coalesce_expr + f",COALESCE(STRING({col_name}),'')"
-
-                hash_expr = (
-                    coalesce_expr.replace("(,", "hash(CONCAT(") + ")) as ingesta_hash"
-                )
-                hash_expr = hash_expr.replace(
-                    "COALESCE(STRING(PARTICION_LECTURA),''),", ""
-                )
-                # aplicar campos extras
-                p_expresion_campos_extras = row.p_expresion_campos_extras
-                p_expr_extras = (p_expresion_campos_extras).split(";")
-                # anadir hash
+                hash_expr, md5_expr = build_hash_expressions(df1)
+                p_expr_extras = [
+                    expr
+                    for expr in str(row.p_expresion_campos_extras).split(";")
+                    if str(expr).strip() != ""
+                ]
                 p_expr_extras.append(hash_expr)
-
-                # calcular identificador de fila md5
-                aplica_md5 = str(param_dict.get("calcula_md5"))
-                if aplica_md5 == "1":
-                    md5_expr = (
-                        coalesce_expr.replace("(,", "md5(CONCAT(") + ")) as ingesta_md5"
-                    )
+                if aplica_md5:
                     p_expr_extras.append(md5_expr)
 
-                # identificar carga stock delta
-                is_stock_delta = 0
-                if (
+                is_stock_delta = int(
                     row.tipo_tabla == "stock"
-                    and "SDELTA_ID" in p_expresion_campos_extras
-                ):
-                    is_stock_delta = 1
-                    ingest["is_stock_delta"] = is_stock_delta
+                    and "SDELTA_ID" in str(row.p_expresion_campos_extras)
+                )
+                ingest["is_stock_delta"] = is_stock_delta
 
                 df2 = df1.selectExpr(
                     "*",
                     *p_expr_extras,
                     "FROM_UTC_TIMESTAMP(current_timestamp(), 'America/Guayaquil') AS fecha_ingesta",
                 )
-                append_log("Aplicar campos extras")
-                # calcular checksum origen
-                ingest["checksum_source"] = get_checksum(df2, 1)
-                # ubicacion tabla
-                p_target_location = row.p_ruta_salida + "/" + row.p_nombre_tabla
+                append_log(log_control_list, "Aplicar campos extras")
+
+                ingest["checksum_source"] = checksum_from_hash(df2)
+
                 if row.tipo_escritura == "parquet":
-                    # PARQUET - HISTORY
                     if row.tipo_tabla == "history":
-                        # Escribir en parquet
-                        df2 = casteo_destino(df2, p_target_location, "parquet")
-                        df2.write.partitionBy("periodo").mode("overwrite").parquet(
+                        df_out = casteo_destino(df2, p_target_location, "parquet", log_control_list)
+                        df_out.write.partitionBy("periodo").mode("overwrite").parquet(
                             p_target_location
                         )
-                        append_log("Guardar PARQUET - HISTORY")
-                    # PARQUET - STOCK
+                        append_log(log_control_list, "Guardar PARQUET - HISTORY")
                     else:
-                        # verificar stock delta
+                        df_out = casteo_destino(df2, p_target_location, "parquet", log_control_list)
                         if is_stock_delta == 1:
-                            # verificar si existe delta
-                            previous_delta = ""
-                            try:
-                                df_aux = spark.read.parquet(
-                                    f"{p_target_location}_sdelta"
-                                ).selectExpr("STRING(MAX(periodo)) as periodo")
-                                previous_delta = df_aux.collect()[0][0]
-
-                            except Exception as error_delta:
-                                append_log(
-                                    "Verificar, Delta anterior, " + str(error_delta)
-                                )
-
-                            append_log("Periodo Ultimo Delta: {previous_delta}")
-                            df2 = casteo_destino(df2, p_target_location, "parquet")
                             new_periodo = (
-                                df2.selectExpr("STRING(periodo) AS periodo")
+                                df_out.selectExpr("STRING(periodo) AS periodo")
                                 .limit(1)
                                 .collect()[0][0]
                             )
-                            append_log("Periodo Actual Delta: {new_periodo}")
-
-                            # comparar ultima carga con nueva carga
+                            append_log(log_control_list, f"Periodo Actual Delta: {new_periodo}")
                             try:
-                                df_old = spark.read.format("parquet").load(
-                                    p_target_location
-                                )
+                                df_old = spark.read.format("parquet").load(p_target_location)
                                 old_count = df_old.count()
                                 old_periodo = (
                                     df_old.selectExpr("STRING(periodo) AS periodo")
                                     .limit(1)
                                     .collect()[0][0]
                                 )
-                                append_log("Conteo Ultima Carga {old_count}")
+                                append_log(log_control_list, f"Conteo Ultima Carga {old_count}")
                                 if old_count > 0:
-                                    # crear delta
-                                    df2.createOrReplaceTempView("new")
-                                    df_old.createOrReplaceTempView("old")
-
-                                    # captura insert/ update / delete
-                                    # el periodo se toma siempre del new
-                                    # cuando son eliminaciones se toman los datos del OLD; cuando son nuevos o updates se toman del NEW
-                                    delta_count = 0
-                                    # validar si existe antes delta, sino es primera carga
-                                    if previous_delta != "":
-                                        df_delta = (
-                                            spark.sql(
-                                                f"""SELECT
-                                            CASE
-                                                WHEN N.SDELTA_ID IS NOT NULL THEN STRUCT(N.*)
-                                                ELSE STRUCT(O.*)
-                                            END datos
-                                            ,CASE
-                                                WHEN N.SDELTA_ID IS NOT NULL AND O.SDELTA_ID IS NOT NULL THEN 'U'  
-                                                WHEN N.SDELTA_ID IS NOT NULL AND O.SDELTA_ID IS     NULL THEN 'I'
-                                                WHEN N.SDELTA_ID IS     NULL AND O.SDELTA_ID IS NOT NULL THEN 'D'                                    
-                                                ELSE '-'
-                                            END as sdelta_operacion
-                                            FROM new N
-                                            FULL OUTER JOIN old O ON (N.SDELTA_ID=O.SDELTA_ID)
-                                            WHERE
-                                            '{new_periodo}' >= '{old_periodo}'
-                                            AND coalesce(N.ingesta_md5,'-') != coalesce(O.ingesta_md5,'-')
-                                            """
-                                            )
-                                            .selectExpr(
-                                                "datos.*",
-                                                "sdelta_operacion",
-                                                f"'{old_periodo}' as sdelta_periodo_compararacion",
-                                            )
-                                            .withColumn("periodo", lit(new_periodo))
-                                        )
-                                        # guardar history snap-delta
-                                        delta_count = df_delta.count()
-                                        append_log("Conteo delta {delta_count}")
-
-                                    if delta_count > 0:
-                                        # si existe delta el mimo dia, se realiza append
-                                        write_mode = "overwrite"
-                                        if previous_delta == new_periodo:
-                                            write_mode = "append"
-
-                                        # escritura  delta
-                                        df_delta = casteo_destino(
-                                            df2, p_target_location, "parquet"
-                                        )
-                                        df_delta.write.partitionBy("periodo").mode(
-                                            write_mode
-                                        ).parquet(f"{p_target_location}_sdelta")
-                                        append_log("Escritura delta modo {write_mode}")
-                                    else:
-                                        # verificar si existe tabla delta
-                                        if previous_delta == "":
-                                            # carga inicial
-                                            df_delta0 = df2.selectExpr(
-                                                "*",
-                                                "'I' as sdelta_operacion",
-                                                "'' as sdelta_periodo_compararacion",
-                                            )
-                                            df_delta0.write.partitionBy("periodo").mode(
-                                                "overwrite"
-                                            ).parquet(f"{p_target_location}_sdelta")
-                                            append_log(
-                                                f"Escritura primera vez, {p_target_location}_sdelta"
-                                            )
-
-                                append_log("Guardar PARQUET - STOCK_DELTA")
+                                    process_stock_delta(
+                                        df_out,
+                                        p_target_location,
+                                        new_periodo,
+                                        old_periodo,
+                                        log_control_list,
+                                    )
+                                append_log(log_control_list, "Guardar PARQUET - STOCK_DELTA")
                             except Exception as error_sd:
-                                append_log(str(error_sd))
+                                append_log(log_control_list, str(error_sd))
                                 ingest["error"] = str(error_sd)
 
-                        # verificar stock snap
                         if row.p_requiere_shist == 1:
-                            # guardar history snap
-                            df2 = casteo_destino(df2, p_target_location, "parquet")
-                            df2.write.partitionBy("periodo").mode("overwrite").parquet(
+                            df_out.write.partitionBy("periodo").mode("overwrite").parquet(
                                 f"{p_target_location}_shist"
                             )
-                            append_log("Guardar PARQUET - STOCK_SHIST")
+                            append_log(log_control_list, "Guardar PARQUET - STOCK_SHIST")
 
-                        # guardar stock
-                        df2 = casteo_destino(df2, p_target_location, "parquet")
-                        df2.write.mode("overwrite").parquet(p_target_location)
-                        append_log("Guardar PARQUET - STOCK")
+                        df_out.write.mode("overwrite").parquet(p_target_location)
+                        append_log(log_control_list, "Guardar PARQUET - STOCK")
                 else:
-                    # DELTA - HISTORY
                     if row.tipo_tabla == "history":
-                        # Escribir en delta
-                        df2 = casteo_destino(df2, p_target_location, "delta")
-                        save_delta_partition(df2, p_replace_where, p_target_location)
-                        append_log("Guardar DELTA - HISTORY")
-
-                    # DELTA - STOCK
+                        df_out = casteo_destino(df2, p_target_location, "delta", log_control_list)
+                        save_delta_partition(df_out, row.p_condicion_reproceso, p_target_location)
+                        append_log(log_control_list, "Guardar DELTA - HISTORY")
                     else:
-                        df2 = casteo_destino(df2, p_target_location, "delta")
-                        df2.write.format("delta").mode("overwrite").option(
-                            "mergeSchema", "true"
-                        ).save(p_target_location)
-                        append_log("Guardar DELTA - STOCK")
-                        # verificar stock snap
+                        df_out = casteo_destino(df2, p_target_location, "delta", log_control_list)
+                        (
+                            df_out.write.format("delta")
+                            .mode("overwrite")
+                            .option("mergeSchema", "true")
+                            .save(p_target_location)
+                        )
+                        append_log(log_control_list, "Guardar DELTA - STOCK")
+
                         if row.p_requiere_shist == 1:
-                            # guardar history snap delta
-                            df2 = casteo_destino(df2, p_target_location, "delta")
                             save_delta_partition(
-                                df2, p_replace_where, p_target_location + "_shist"
+                                df_out,
+                                row.p_condicion_reproceso,
+                                f"{p_target_location}_shist",
                             )
-                            append_log("Guardar DELTA - STOCK_SHIST")
-                # resumen
+                            append_log(log_control_list, "Guardar DELTA - STOCK_SHIST")
+
                 p_columna_delta = row.p_columna_delta
                 row_sum = df2.selectExpr(
                     "count(1) as cantidad_insertados",
                     f"string(min({p_columna_delta})) as rango_ini_procesado",
                     f"string(max({p_columna_delta})) as rango_fin_procesado",
                 ).collect()[0]
-                append_log("Obtener Resumen")
+                append_log(log_control_list, "Obtener Resumen")
+
                 ingest["cantidad_insertados"] = row_sum.cantidad_insertados
                 ingest["rango_ini_procesado"] = row_sum.rango_ini_procesado
                 ingest["rango_fin_procesado"] = row_sum.rango_fin_procesado
                 ingest["fecha_fin"] = get_fecha_sql()
                 ingest["estado"] = "FINALIZADO"
-                ingest["log_detail"] = (
-                    str(log_control_list) + "Ubicacion: " + p_target_location
-                )
-                # Checksum destino
+                ingest["log_detail"] = f"{log_control_list} Ubicacion: {p_target_location}"
+
                 if row.tipo_tabla != "history":
                     if row.tipo_escritura == "parquet":
                         df_checksum = spark.read.parquet(p_target_location)
@@ -455,48 +411,29 @@ def pyspark_transform(spark, df, param_dict):
                             row.p_condicion_reproceso
                         )
                     else:
-                        df_checksum = (
-                            spark.read.format("delta")
-                            .load(p_target_location)
-                            .filter(row.p_condicion_reproceso)
-                        )
-                ingest["checksum_destination"] = get_checksum(df_checksum, 0)
+                        df_checksum = spark.read.format("delta").load(
+                            p_target_location
+                        ).filter(row.p_condicion_reproceso)
+
+                ingest["checksum_destination"] = checksum_from_hash(df_checksum, hash_expr)
             else:
-                ingest_list = [
+                ingest.update(
                     {
-                        "id_ingesta": row.p_id_ingesta,
-                        "fecha_inicio": get_fecha_sql(),
-                        "estado": "FALLIDO",
                         "fecha_fin": get_fecha_sql(),
-                        "cantidad_insertados": 0,
-                        "error": "",
-                        "rango_ini_procesado": "",
-                        "rango_fin_procesado": "",
-                        "id_control": "",
-                        "punto_control": "",
-                        "p_columna_delta_tipo_dato": "",
-                        "log_control": "",
+                        "estado": "FALLIDO",
                         "log1": p_target_location,
                         "error1": "SIN DATOS",
-                        "checksum_source": 0,
-                        "checksum_destination": 0,
-                        "cantidad_leidos": 0,
-                        "is_stock_delta": 0,
-                        "log_detail": "",
-                        "coleccion_salida": coleccion_salida,
-                        "nombre_tabla": nombre_tabla,
-                        "root_metada_path": row_dict1.get("root_metada_path"),
-                        "tiene_shist": str(row.p_requiere_shist),
-                        "objeto_existe": objeto_existe,
+                        "log_detail": str(log_control_list),
                     }
-                ]
+                )
         except Exception as err:
             ingest["fecha_fin"] = get_fecha_sql()
             ingest["error"] = str(err)
             ingest["estado"] = "FALLIDO"
-        # logs
+            ingest["log_detail"] = str(log_control_list)
+
+        ingest["log_control"] = log_control_list[-1] if log_control_list else ""
         ingest_list.append(ingest)
-    output_df = (
-        spark.createDataFrame(ingest_list).where("id_ingesta!=''").selectExpr("*")
-    )
+
+    output_df = spark.createDataFrame(ingest_list).where("id_ingesta!=''").selectExpr("*")
     return output_df
