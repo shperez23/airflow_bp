@@ -29,7 +29,19 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     # Parameter Guard Pattern
     # =====================================
-    aplica_md5 = str(param_dict.get("calcula_md5", "0")) == "1"
+    def get_bool_param(name, default=False):
+        raw_value = param_dict.get(name, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+
+        normalized = str(raw_value).strip().lower()
+        if normalized in {"1", "true", "yes", "y", "si", "sí"}:
+            return True
+        if normalized in {"0", "false", "no", "n"}:
+            return False
+        return default
+
+    aplica_md5 = get_bool_param("calcula_md5", False)
 
     # =====================================
     # Utility Functions
@@ -46,6 +58,20 @@ def pyspark_transform(spark, df, param_dict):
 
     def append_log(log_list, log_str):
         log_list.append(f"{get_fecha_str()} {log_str}")
+
+    def get_row_value(row, field_name, default=None):
+        if hasattr(row, "asDict"):
+            return row.asDict().get(field_name, default)
+        if hasattr(row, "get"):
+            return row.get(field_name, default)
+        return getattr(row, field_name, default)
+
+    def get_df_period(df_base):
+        return (
+            df_base.selectExpr("STRING(periodo) AS periodo")
+            .limit(1)
+            .collect()[0][0]
+        )
 
     def default_ingest_record():
         fecha_actual = get_fecha_sql()
@@ -222,6 +248,80 @@ def pyspark_transform(spark, df, param_dict):
             )
             append_log(log_list, f"Escritura primera vez, {target_location}_sdelta")
 
+    def write_parquet_history(df_input, target_location, log_list):
+        df_out = casteo_destino(df_input, target_location, "parquet", log_list)
+        df_out.write.partitionBy("periodo").mode("overwrite").parquet(target_location)
+        append_log(log_list, "Guardar PARQUET - HISTORY")
+        return df_out
+
+    def write_parquet_stock(df_input, target_location, row, is_stock_delta, log_list):
+        df_out = casteo_destino(df_input, target_location, "parquet", log_list)
+
+        if is_stock_delta == 1:
+            new_periodo = get_df_period(df_out)
+            append_log(log_list, f"Periodo Actual Delta: {new_periodo}")
+            try:
+                df_old = spark.read.format("parquet").load(target_location)
+                old_count = df_old.count()
+                old_periodo = get_df_period(df_old)
+                append_log(log_list, f"Conteo Ultima Carga {old_count}")
+                if old_count > 0:
+                    process_stock_delta(
+                        df_out,
+                        target_location,
+                        new_periodo,
+                        old_periodo,
+                        log_list,
+                    )
+                append_log(log_list, "Guardar PARQUET - STOCK_DELTA")
+            except Exception as error_sd:
+                append_log(log_list, str(error_sd))
+                raise
+
+        if row.p_requiere_shist == 1:
+            df_out.write.partitionBy("periodo").mode("overwrite").parquet(
+                f"{target_location}_shist"
+            )
+            append_log(log_list, "Guardar PARQUET - STOCK_SHIST")
+
+        df_out.write.mode("overwrite").parquet(target_location)
+        append_log(log_list, "Guardar PARQUET - STOCK")
+        return df_out
+
+    def write_delta_history(df_input, target_location, row, log_list):
+        df_out = casteo_destino(df_input, target_location, "delta", log_list)
+        save_delta_partition(df_out, row.p_condicion_reproceso, target_location)
+        append_log(log_list, "Guardar DELTA - HISTORY")
+        return df_out
+
+    def write_delta_stock(df_input, target_location, row, log_list):
+        df_out = casteo_destino(df_input, target_location, "delta", log_list)
+        (
+            df_out.write.format("delta")
+            .mode("overwrite")
+            .option("mergeSchema", "true")
+            .save(target_location)
+        )
+        append_log(log_list, "Guardar DELTA - STOCK")
+
+        if row.p_requiere_shist == 1:
+            save_delta_partition(
+                df_out,
+                row.p_condicion_reproceso,
+                f"{target_location}_shist",
+            )
+            append_log(log_list, "Guardar DELTA - STOCK_SHIST")
+        return df_out
+
+    def resolve_writer(tipo_escritura, tipo_tabla):
+        writers = {
+            ("parquet", "history"): write_parquet_history,
+            ("parquet", "stock"): write_parquet_stock,
+            ("delta", "history"): write_delta_history,
+            ("delta", "stock"): write_delta_stock,
+        }
+        return writers.get((str(tipo_escritura), str(tipo_tabla)))
+
     ingest_list = [default_ingest_record()]
 
     # =====================================
@@ -316,76 +416,23 @@ def pyspark_transform(spark, df, param_dict):
 
                 ingest["checksum_source"] = checksum_from_hash(df2)
 
-                if row.tipo_escritura == "parquet":
-                    if row.tipo_tabla == "history":
-                        df_out = casteo_destino(df2, p_target_location, "parquet", log_control_list)
-                        df_out.write.partitionBy("periodo").mode("overwrite").parquet(
-                            p_target_location
-                        )
-                        append_log(log_control_list, "Guardar PARQUET - HISTORY")
-                    else:
-                        df_out = casteo_destino(df2, p_target_location, "parquet", log_control_list)
-                        if is_stock_delta == 1:
-                            new_periodo = (
-                                df_out.selectExpr("STRING(periodo) AS periodo")
-                                .limit(1)
-                                .collect()[0][0]
-                            )
-                            append_log(log_control_list, f"Periodo Actual Delta: {new_periodo}")
-                            try:
-                                df_old = spark.read.format("parquet").load(p_target_location)
-                                old_count = df_old.count()
-                                old_periodo = (
-                                    df_old.selectExpr("STRING(periodo) AS periodo")
-                                    .limit(1)
-                                    .collect()[0][0]
-                                )
-                                append_log(log_control_list, f"Conteo Ultima Carga {old_count}")
-                                if old_count > 0:
-                                    process_stock_delta(
-                                        df_out,
-                                        p_target_location,
-                                        new_periodo,
-                                        old_periodo,
-                                        log_control_list,
-                                    )
-                                append_log(log_control_list, "Guardar PARQUET - STOCK_DELTA")
-                            except Exception as error_sd:
-                                append_log(log_control_list, str(error_sd))
-                                ingest["error"] = str(error_sd)
+                writer = resolve_writer(row.tipo_escritura, row.tipo_tabla)
+                if writer is None:
+                    raise ValueError(
+                        "Combinación no soportada para escritura: "
+                        f"tipo_escritura={row.tipo_escritura}, tipo_tabla={row.tipo_tabla}"
+                    )
 
-                        if row.p_requiere_shist == 1:
-                            df_out.write.partitionBy("periodo").mode("overwrite").parquet(
-                                f"{p_target_location}_shist"
-                            )
-                            append_log(log_control_list, "Guardar PARQUET - STOCK_SHIST")
-
-                        df_out.write.mode("overwrite").parquet(p_target_location)
-                        append_log(log_control_list, "Guardar PARQUET - STOCK")
+                if row.tipo_escritura == "parquet" and row.tipo_tabla == "history":
+                    df_out = writer(df2, p_target_location, log_control_list)
+                elif row.tipo_escritura == "parquet" and row.tipo_tabla != "history":
+                    df_out = writer(df2, p_target_location, row, is_stock_delta, log_control_list)
+                elif row.tipo_escritura == "delta" and row.tipo_tabla == "history":
+                    df_out = writer(df2, p_target_location, row, log_control_list)
                 else:
-                    if row.tipo_tabla == "history":
-                        df_out = casteo_destino(df2, p_target_location, "delta", log_control_list)
-                        save_delta_partition(df_out, row.p_condicion_reproceso, p_target_location)
-                        append_log(log_control_list, "Guardar DELTA - HISTORY")
-                    else:
-                        df_out = casteo_destino(df2, p_target_location, "delta", log_control_list)
-                        (
-                            df_out.write.format("delta")
-                            .mode("overwrite")
-                            .option("mergeSchema", "true")
-                            .save(p_target_location)
-                        )
-                        append_log(log_control_list, "Guardar DELTA - STOCK")
+                    df_out = writer(df2, p_target_location, row, log_control_list)
 
-                        if row.p_requiere_shist == 1:
-                            save_delta_partition(
-                                df_out,
-                                row.p_condicion_reproceso,
-                                f"{p_target_location}_shist",
-                            )
-                            append_log(log_control_list, "Guardar DELTA - STOCK_SHIST")
-
-                p_columna_delta = row.p_columna_delta
+                p_columna_delta = get_row_value(row, "p_columna_delta")
                 row_sum = df2.selectExpr(
                     "count(1) as cantidad_insertados",
                     f"string(min({p_columna_delta})) as rango_ini_procesado",
