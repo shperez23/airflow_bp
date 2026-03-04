@@ -54,7 +54,7 @@ def pyspark_transform(spark, df, param_dict):
         return value is None or (isinstance(value, str) and value.strip() == "")
 
     input_df = resolve_input_frame(df, ["pys_lectura_normalizacion"])
-    params_df = resolve_input_frame(df, ["tri_parametros_write", "Tri_parametros_write"])
+    params_df = resolve_input_frame(df, ["tri_parametros_write"])
 
     if params_df is None:
         params_df = df
