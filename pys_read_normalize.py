@@ -369,7 +369,7 @@ def pyspark_transform(spark, df, param_dict):
         inferred_dataset = dataset_name(src_file) if src_file else None
         error_records.append((
             src_file,
-            "ERROR_AGUAS_ARRIBA",
+            "ERROR_UPSTREAM",
             inherited.error_message or inherited.status or "Error heredado desde upstream",
             None,
             src_file,

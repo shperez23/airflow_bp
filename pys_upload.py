@@ -320,7 +320,7 @@ def pyspark_transform(spark, df, param_dict):
                     size2 = size1
 
                 if size1 != size2 or size1 == 0:
-                    resultados.append((remoto, "", "OMITIDO_NO_LISTO", "LISTO_PARA_LECTURA", "Archivo en copia activa o vacío"))
+                    resultados.append((remoto, "", "OMITIDO_NO_LISTO", "READINESS", "Archivo en copia activa o vacío"))
                     continue
 
                 # =====================================
