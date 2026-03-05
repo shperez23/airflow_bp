@@ -1,4 +1,5 @@
 from pyspark.sql.functions import col
+import re
 
 
 def pyspark_transform(spark, df, param_dict):
@@ -45,6 +46,23 @@ def pyspark_transform(spark, df, param_dict):
     append_log("Inicio pys_descubrimiento_archivos")
 
     # =====================================
+    # Upstream Status Adapter Pattern
+    # Interpreta contrato estandarizado de upload para validar continuidad
+    # =====================================
+    def parse_processed_count(log_detail):
+        if is_missing(log_detail):
+            return 0
+
+        matches = re.findall(r"procesados=(\d+)", str(log_detail))
+        if not matches:
+            return 0
+
+        try:
+            return int(matches[-1])
+        except Exception:
+            return 0
+
+    # =====================================
     # Multi-Input Resolver Pattern
     # Resuelve entradas cuando el orquestador envía múltiples dataframes
     # =====================================
@@ -72,6 +90,8 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     input_cols = set(upload_df.columns)
     has_upload_contract = {"full_path", "s3_key", "status"}.issubset(input_cols)
+    has_standardized_contract = {"estado", "error", "log_control", "log_detail"}.issubset(input_cols)
+    upload_processed_count = 0
 
     # =====================================
     # Dataset Discovery Pattern
@@ -116,6 +136,43 @@ def pyspark_transform(spark, df, param_dict):
             )
         else:
             upload_errors = None
+
+    elif has_standardized_contract:
+        relative_upload_file_path = param_dict.get("relative_upload_file_path")
+
+        upload_status_row = upload_df.selectExpr("estado", "error", "log_detail").first()
+        if upload_status_row is not None:
+            upload_processed_count = parse_processed_count(upload_status_row.log_detail)
+            append_log(f"Contrato estandarizado de upload detectado: estado={upload_status_row.estado}, procesados={upload_processed_count}")
+
+            if str(upload_status_row.estado).upper() == "FALLIDO":
+                return build_status_df("FALLIDO", f"Upload falló: {upload_status_row.error}")
+
+        if is_missing(bucket_blob):
+            return build_status_df("FALLIDO", "Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_discovery")
+        if is_missing(relative_upload_file_path):
+            return build_status_df("FALLIDO", "Falta parámetro requerido 'relative_upload_file_path'")
+
+        # =====================================
+        # Raw Prefix Alignment Pattern
+        # Descubre desde /original/ para alinearse con la escritura de upload
+        # =====================================
+        raw_path = f"s3a://{bucket_blob}/{relative_upload_file_path}/original/"
+        pending = (
+            spark.read
+            .format("binaryFile")
+            .option("recursiveFileLookup", "true")
+            .load(raw_path)
+            .selectExpr(
+                "path",
+                "'PENDIENTE' as discovery_status",
+                "cast(null as string) as error_message",
+                "path as source_file"
+            )
+            .distinct()
+        )
+        append_log("Descubrimiento ejecutado desde contrato estandarizado en prefijo /original/")
+        upload_errors = None
 
     else:
         # =====================================
@@ -202,5 +259,15 @@ def pyspark_transform(spark, df, param_dict):
 
     if total_errors > 0:
         return build_status_df("FALLIDO", f"Se detectaron {total_errors} errores heredados desde la carga")
+
+    if upload_processed_count > 0 and total_pending == 0:
+        return build_status_df(
+            "FALLIDO",
+            (
+                "No se descubrieron archivos pendientes, pero upload reportó "
+                f"procesados={upload_processed_count}. Verifique 'relative_upload_file_path' "
+                "y que discovery lea el prefijo /original/."
+            ),
+        )
 
     return build_status_df("FINALIZADO", "")
