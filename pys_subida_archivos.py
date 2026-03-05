@@ -69,7 +69,10 @@ def pyspark_transform(spark, df, param_dict):
         if row is None:
             return default
 
-        value = row[column_name]
+        try:
+            value = row[column_name]
+        except Exception:
+            return default
         if value is None:
             return default
         if isinstance(value, str) and value.strip() == "":
@@ -115,7 +118,24 @@ def pyspark_transform(spark, df, param_dict):
     # =====================================
     append_log("Inicio pys_subida_archivos")
 
-    param_row = df.first()
+    required_param_columns = {"SFTP_HOST", "SFTP_VAULT_NAME", "NOMBRE_ARCHIVO", "SFTP_PATH", "BUCKET_BLOB"}
+
+    try:
+        input_columns = set(df.columns)
+    except Exception as exc:
+        return build_status_df("FALLIDO", f"No fue posible leer columnas del dataframe de entrada: {sanitize_error_message(exc)}")
+
+    missing_required_columns = sorted(required_param_columns - input_columns)
+    if missing_required_columns:
+        return build_status_df(
+            "FALLIDO",
+            "Faltan columnas requeridas en el dataframe de entrada: " + ", ".join(missing_required_columns),
+        )
+
+    try:
+        param_row = df.first()
+    except Exception as exc:
+        return build_status_df("FALLIDO", f"No fue posible leer la parametría de entrada: {sanitize_error_message(exc)}")
 
     if param_row is None:
         return build_status_df("FALLIDO", "El dataframe de entrada no contiene registros de parametría")
@@ -179,14 +199,17 @@ def pyspark_transform(spark, df, param_dict):
     except Exception as exc:
         return build_status_df("FALLIDO", sanitize_error_message(exc))
 
-    secret_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.secret.key", None)
-    access_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.access.key", None)
-   
-    session = boto3.Session(
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key
-    )
-    s3 = session.client("s3")
+    try:
+        secret_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.secret.key", None)
+        access_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.access.key", None)
+
+        session = boto3.Session(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key
+        )
+        s3 = session.client("s3")
+    except Exception as exc:
+        return build_status_df("FALLIDO", f"No fue posible inicializar cliente S3: {sanitize_error_message(exc)}")
 
     # =====================================
     # Multipart / Concurrency Control Pattern
