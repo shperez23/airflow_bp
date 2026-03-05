@@ -1,4 +1,3 @@
-from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.sql.functions import current_timestamp, lit
 import pysftp
 import boto3
@@ -13,6 +12,23 @@ from stat import S_ISDIR
 from boto3.s3.transfer import TransferConfig
 
 def pyspark_transform(spark, df, param_dict):
+    # =====================================
+    # Unified Status Contract Pattern
+    # Estandariza la salida a un único registro de control del proceso
+    # =====================================
+    process_log = []
+
+    def append_log(message):
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        process_log.append(f"{ts} {message}")
+
+    def build_status_df(estado, error=""):
+        detail = str(process_log)
+        log_control = process_log[-1] if process_log else ""
+        return spark.createDataFrame(
+            [(estado, error, log_control, detail)],
+            ["estado", "error", "log_control", "log_detail"],
+        )
 
     # =====================================
     # Parameter Guard Pattern
@@ -97,10 +113,12 @@ def pyspark_transform(spark, df, param_dict):
     # External Trigger
     # Define los parámetros de ejecución enviados por el orquestador
     # =====================================
+    append_log("Inicio pys_subida_archivos")
+
     param_row = df.first()
 
     if param_row is None:
-        raise ValueError("El dataframe de entrada no contiene registros de parametría")
+        return build_status_df("FALLIDO", "El dataframe de entrada no contiene registros de parametría")
 
     sftp_host = get_row_value(param_row, "SFTP_HOST")
     sftp_port = get_int_value(get_row_value(param_row, "SFTP_PORT", 22), 22)
@@ -112,11 +130,11 @@ def pyspark_transform(spark, df, param_dict):
     bucket_name = get_row_value(param_row, "BUCKET_BLOB")
 
     if not sftp_host:
-        raise ValueError("Falta parámetro requerido 'SFTP_HOST'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'SFTP_HOST'")
     if not sftp_vault_name:
-        raise ValueError("Falta parámetro requerido 'SFTP_VAULT_NAME'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'SFTP_VAULT_NAME'")
     if not nombre_archivo:
-        raise ValueError("Falta parámetro requerido 'NOMBRE_ARCHIVO'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'NOMBRE_ARCHIVO'")
 
     # =====================================
     # Secrets Pointer Pattern
@@ -126,10 +144,10 @@ def pyspark_transform(spark, df, param_dict):
     pwd = spark.conf.get(f"spark.db.{sftp_vault_name}.pass", "")
 
     if not user or not pwd:
-        raise ValueError(f"Faltan credenciales para sftp_vault_name '{sftp_vault_name}'")
+        return build_status_df("FALLIDO", f"Faltan credenciales para sftp_vault_name '{sftp_vault_name}'")
 
     if not sftp_path:
-        raise ValueError("Falta parámetro requerido 'SFTP_PATH'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'SFTP_PATH'")
 
     # =====================================
     # Dynamic Source Resolver Pattern
@@ -146,17 +164,20 @@ def pyspark_transform(spark, df, param_dict):
     relative_upload_control_path = param_dict.get("relative_upload_control_path")
 
     if not bucket_name:
-        raise ValueError("Falta parámetro requerido 'bucket'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'bucket'")
     if not relative_upload_file_path:
-        raise ValueError("Falta parámetro requerido 'relative_upload_file_path'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'relative_upload_file_path'")
     if not relative_upload_control_path:
-        raise ValueError("Falta parámetro requerido 'relative_upload_control_path'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'relative_upload_control_path'")
 
     # =====================================
     # Naming Strategy Pattern
     # Construye los nombres esperados según ventana de fechas diaria
     # =====================================
-    expected_filenames = build_expected_filenames(nombre_archivo, fecha_desde, fecha_hasta)
+    try:
+        expected_filenames = build_expected_filenames(nombre_archivo, fecha_desde, fecha_hasta)
+    except Exception as exc:
+        return build_status_df("FALLIDO", sanitize_error_message(exc))
 
     secret_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.secret.key", None)
     access_key = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.access.key", None)
@@ -272,152 +293,160 @@ def pyspark_transform(spark, df, param_dict):
     # External Connector Pattern (SFTP)
     # Maneja la conexión externa desacoplada del resto del pipeline
     # =====================================
-    with pysftp.Connection(host=sftp_host, port=sftp_port, username=user, password=pwd, cnopts=cnopts) as sftp:
+    try:
+        with pysftp.Connection(host=sftp_host, port=sftp_port, username=user, password=pwd, cnopts=cnopts) as sftp:
+            append_log("Conexión SFTP establecida")
 
-        archivos = list_files_recursive(sftp, sftp_path)
+            archivos = list_files_recursive(sftp, sftp_path)
+            append_log(f"Archivos descubiertos en SFTP: {len(archivos)}")
 
-        for remoto in archivos:
-
-            # =====================================
-            # Path Preservation Pattern
-            # Evita sobrescrituras y mantiene trazabilidad del origen
-            # =====================================
-            rel_path = remoto[len(sftp_path):].lstrip("/")
-            remote_filename = os.path.basename(remoto)
-            tmp_file = f"/tmp/{uuid.uuid4().hex}"
-
-            # =====================================
-            # Filename Filter Pattern
-            # Procesa únicamente archivos esperados por estrategia de nombres
-            # =====================================
-            if remote_filename not in expected_filenames:
-                continue
-
-            try:
+            for remoto in archivos:
 
                 # =====================================
-                # Readiness Marker Pattern
-                # Evita ingerir archivos mientras aún se están copiando
+                # Path Preservation Pattern
+                # Evita sobrescrituras y mantiene trazabilidad del origen
                 # =====================================
-                stat1 = sftp.stat(remoto)
-                size1 = stat1.st_size
-                mtime1 = int(stat1.st_mtime)
+                rel_path = remoto[len(sftp_path):].lstrip("/")
+                remote_filename = os.path.basename(remoto)
+                tmp_file = f"/tmp/{uuid.uuid4().hex}"
 
                 # =====================================
-                # Fast Metadata Checkpoint Pattern
-                # Salta archivos ya procesados sin descargarlos nuevamente
+                # Filename Filter Pattern
+                # Procesa únicamente archivos esperados por estrategia de nombres
                 # =====================================
-                signature = (rel_path, int(size1), int(mtime1))
-                if signature in processed_signatures:
-                    resultados.append((remoto, "", "OMITIDO_YA_PROCESADO", "CARGA", "Archivo ya procesado por checkpoint de metadata"))
+                if remote_filename not in expected_filenames:
                     continue
 
-                file_age_seconds = int(time.time()) - int(mtime1)
-                if file_age_seconds < readiness_skip_wait_age_seconds:
-                    time.sleep(readiness_wait_seconds)
-                    size2 = sftp.stat(remoto).st_size
-                else:
-                    size2 = size1
-
-                if size1 != size2 or size1 == 0:
-                    resultados.append((remoto, "", "OMITIDO_NO_LISTO", "READINESS", "Archivo en copia activa o vacío"))
-                    continue
-
-                # =====================================
-                # Passthrough Replicator Pattern
-                # Replica el archivo crudo para preservar la evidencia original
-                # =====================================
-                sftp.get(remoto, tmp_file)
-
-                # =====================================
-                # Idempotent Consumer Pattern
-                # Evita reprocesar archivos ya ingeridos
-                # =====================================
-                hash_value = file_hash(tmp_file)
-
-                if hash_value in processed_hashes:
-                    os.remove(tmp_file)
-                    resultados.append((remoto, "", "OMITIDO_YA_PROCESADO", "CARGA", "Archivo ya procesado por hash"))
-                    continue
-
-                # =====================================
-                # Raw Landing Zone Pattern
-                # Guarda el archivo en la zona raw del data lake
-                # =====================================
-                s3_key = f"{RAW_PREFIX}{rel_path}"
-                s3.upload_file(tmp_file, bucket_name, s3_key, Config=transfer_config)
-
-                # =====================================
-                # Compression Detection Pattern
-                # Detecta compresión real y no solo extensión
-                # =====================================
-                is_gzip = False
                 try:
-                    with gzip.open(tmp_file, "rb") as test:
-                        test.read(1)
-                    is_gzip = True
-                except:
-                    pass
+                    # =====================================
+                    # Readiness Marker Pattern
+                    # Evita ingerir archivos mientras aún se están copiando
+                    # =====================================
+                    stat1 = sftp.stat(remoto)
+                    size1 = stat1.st_size
+                    mtime1 = int(stat1.st_mtime)
 
-                # =====================================
-                # Compression Normalizer Pattern
-                # Genera versión descomprimida para consumo analítico
-                # =====================================
-                if is_gzip:
-                    tmp_uncomp = f"/tmp/{uuid.uuid4().hex}"
-                    with gzip.open(tmp_file, "rb") as f_in:
-                        with open(tmp_uncomp, "wb") as f_out:
-                            shutil.copyfileobj(f_in, f_out)
+                    # =====================================
+                    # Fast Metadata Checkpoint Pattern
+                    # Salta archivos ya procesados sin descargarlos nuevamente
+                    # =====================================
+                    signature = (rel_path, int(size1), int(mtime1))
+                    if signature in processed_signatures:
+                        resultados.append((remoto, "", "OMITIDO_YA_PROCESADO", "CARGA", "Archivo ya procesado por checkpoint de metadata"))
+                        continue
 
-                    s3.upload_file(tmp_uncomp, bucket_name, f"{UNCOMP_PREFIX}{rel_path.replace('.gz','')}", Config=transfer_config)
-                    os.remove(tmp_uncomp)
+                    file_age_seconds = int(time.time()) - int(mtime1)
+                    if file_age_seconds < readiness_skip_wait_age_seconds:
+                        time.sleep(readiness_wait_seconds)
+                        size2 = sftp.stat(remoto).st_size
+                    else:
+                        size2 = size1
 
-                # =====================================
-                # Metadata Decorator Pattern
-                # Añade metadata de ingestión para lineage y auditoría
-                # =====================================
-                checkpoint_records.append((rel_path, hash_value, s3_key, int(size1), int(mtime1)))
+                    if size1 != size2 or size1 == 0:
+                        resultados.append((remoto, "", "OMITIDO_NO_LISTO", "READINESS", "Archivo en copia activa o vacío"))
+                        continue
 
-                processed_hashes.add(hash_value)
-                processed_signatures.add(signature)
+                    # =====================================
+                    # Passthrough Replicator Pattern
+                    # Replica el archivo crudo para preservar la evidencia original
+                    # =====================================
+                    sftp.get(remoto, tmp_file)
 
-                resultados.append((remoto, s3_key, "PROCESADO", "CARGA", ""))
+                    # =====================================
+                    # Idempotent Consumer Pattern
+                    # Evita reprocesar archivos ya ingeridos
+                    # =====================================
+                    hash_value = file_hash(tmp_file)
 
-                os.remove(tmp_file)
+                    if hash_value in processed_hashes:
+                        os.remove(tmp_file)
+                        resultados.append((remoto, "", "OMITIDO_YA_PROCESADO", "CARGA", "Archivo ya procesado por hash"))
+                        continue
 
-            except Exception as e:
+                    # =====================================
+                    # Raw Landing Zone Pattern
+                    # Guarda el archivo en la zona raw del data lake
+                    # =====================================
+                    s3_key = f"{RAW_PREFIX}{rel_path}"
+                    s3.upload_file(tmp_file, bucket_name, s3_key, Config=transfer_config)
 
-                # =====================================
-                # Dead-Letter Pattern
-                # Aísla archivos corruptos o con errores para análisis posterior
-                # =====================================
-                if os.path.exists(tmp_file):
-                    s3.upload_file(tmp_file, bucket_name, f"{QUARANTINE}{rel_path}", Config=transfer_config)
+                    # =====================================
+                    # Compression Detection Pattern
+                    # Detecta compresión real y no solo extensión
+                    # =====================================
+                    is_gzip = False
+                    try:
+                        with gzip.open(tmp_file, "rb") as test:
+                            test.read(1)
+                        is_gzip = True
+                    except Exception:
+                        pass
+
+                    # =====================================
+                    # Compression Normalizer Pattern
+                    # Genera versión descomprimida para consumo analítico
+                    # =====================================
+                    if is_gzip:
+                        tmp_uncomp = f"/tmp/{uuid.uuid4().hex}"
+                        with gzip.open(tmp_file, "rb") as f_in:
+                            with open(tmp_uncomp, "wb") as f_out:
+                                shutil.copyfileobj(f_in, f_out)
+
+                        s3.upload_file(tmp_uncomp, bucket_name, f"{UNCOMP_PREFIX}{rel_path.replace('.gz','')}", Config=transfer_config)
+                        os.remove(tmp_uncomp)
+
+                    # =====================================
+                    # Metadata Decorator Pattern
+                    # Añade metadata de ingestión para lineage y auditoría
+                    # =====================================
+                    checkpoint_records.append((rel_path, hash_value, s3_key, int(size1), int(mtime1)))
+
+                    processed_hashes.add(hash_value)
+                    processed_signatures.add(signature)
+
+                    resultados.append((remoto, s3_key, "PROCESADO", "CARGA", ""))
+                    append_log(f"Archivo procesado con éxito: {remoto}")
+
                     os.remove(tmp_file)
 
-                resultados.append((remoto, "", "ERROR_CARGA", "CARGA", sanitize_error_message(e)))
+                except Exception as e:
+                    # =====================================
+                    # Dead-Letter Pattern
+                    # Aísla archivos corruptos o con errores para análisis posterior
+                    # =====================================
+                    if os.path.exists(tmp_file):
+                        s3.upload_file(tmp_file, bucket_name, f"{QUARANTINE}{rel_path}", Config=transfer_config)
+                        os.remove(tmp_file)
 
-    # =====================================
-    # Batched Checkpointer Pattern
-    # Persiste el estado en lote para reducir small-files y latencia
-    # =====================================
-    if checkpoint_records:
-        meta = spark.createDataFrame(
-            checkpoint_records,
-            ["relative_path", "hash", "s3_key", "remote_size", "remote_mtime"]
-        ).withColumn("ingestion_ts", current_timestamp())
-        meta.write.mode("append").parquet(CHECKPOINT)
+                    error_msg = sanitize_error_message(e)
+                    resultados.append((remoto, "", "ERROR_CARGA", "CARGA", error_msg))
+                    append_log(f"Error de carga para {remoto}: {error_msg}")
+
+        # =====================================
+        # Batched Checkpointer Pattern
+        # Persiste el estado en lote para reducir small-files y latencia
+        # =====================================
+        if checkpoint_records:
+            meta = spark.createDataFrame(
+                checkpoint_records,
+                ["relative_path", "hash", "s3_key", "remote_size", "remote_mtime"]
+            ).withColumn("ingestion_ts", current_timestamp())
+            meta.write.mode("append").parquet(CHECKPOINT)
+            append_log(f"Checkpoints persistidos: {len(checkpoint_records)}")
+    except Exception as exc:
+        append_log(f"Fallo general en subida: {sanitize_error_message(exc)}")
+        return build_status_df("FALLIDO", sanitize_error_message(exc))
 
     # =====================================
     # Process Result Dataset Pattern
     # Genera dataset de auditoría del resultado de la ingestión
     # =====================================
-    schema = StructType([
-        StructField("full_path", StringType(), False),
-        StructField("s3_key", StringType(), False),
-        StructField("status", StringType(), False),
-        StructField("error_stage", StringType(), False),
-        StructField("error_message", StringType(), False),
-    ])
+    total_ok = len([r for r in resultados if r[2] == "PROCESADO"])
+    total_error = len([r for r in resultados if str(r[2]).startswith("ERROR")])
+    total_skip = len([r for r in resultados if str(r[2]).startswith("OMITIDO")])
+    append_log(f"Resumen carga: procesados={total_ok}, errores={total_error}, omitidos={total_skip}")
 
-    return spark.createDataFrame(resultados, schema)
+    if total_error > 0:
+        return build_status_df("FALLIDO", f"Se encontraron {total_error} errores durante la carga")
+
+    return build_status_df("FINALIZADO", "")

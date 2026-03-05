@@ -2,6 +2,22 @@ from pyspark.sql.functions import col
 
 
 def pyspark_transform(spark, df, param_dict):
+    # =====================================
+    # Unified Status Contract Pattern
+    # Estandariza la salida a un único registro de control del proceso
+    # =====================================
+    process_log = []
+
+    def append_log(message):
+        process_log.append(message)
+
+    def build_status_df(estado, error=""):
+        detail = str(process_log)
+        log_control = process_log[-1] if process_log else ""
+        return spark.createDataFrame(
+            [(estado, error, log_control, detail)],
+            ["estado", "error", "log_control", "log_detail"],
+        )
 
     # =====================================
     # Parameter Guard Pattern
@@ -26,6 +42,7 @@ def pyspark_transform(spark, df, param_dict):
 
     include_upload_errors = get_bool_param("include_upload_errors", True)
     include_upload_skipped = get_bool_param("include_upload_skipped", False)
+    append_log("Inicio pys_descubrimiento_archivos")
 
     # =====================================
     # Multi-Input Resolver Pattern
@@ -66,7 +83,7 @@ def pyspark_transform(spark, df, param_dict):
         # Convierte s3_key de upload a path s3a:// consumible por Spark
         # =====================================
         if is_missing(bucket_blob):
-            raise ValueError("Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_discovery para resolver paths desde s3_key")
+            return build_status_df("FALLIDO", "Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_discovery para resolver paths desde s3_key")
 
         pending = (
             upload_df
@@ -79,6 +96,8 @@ def pyspark_transform(spark, df, param_dict):
             )
             .distinct()
         )
+
+        append_log("Contrato de upload detectado")
 
         if include_upload_errors:
             upload_errors_df = upload_df.where((upload_df.status != "PROCESADO") & upload_df.status.rlike("^ERROR"))
@@ -106,9 +125,9 @@ def pyspark_transform(spark, df, param_dict):
         relative_upload_file_path = param_dict.get("relative_upload_file_path")
 
         if is_missing(bucket_blob):
-            raise ValueError("Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_discovery")
+            return build_status_df("FALLIDO", "Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_discovery")
         if is_missing(relative_upload_file_path):
-            raise ValueError("Falta parámetro requerido 'relative_upload_file_path'")
+            return build_status_df("FALLIDO", "Falta parámetro requerido 'relative_upload_file_path'")
 
         raw_path = f"s3a://{bucket_blob}/{relative_upload_file_path}"
         pending = (
@@ -118,6 +137,7 @@ def pyspark_transform(spark, df, param_dict):
             .selectExpr("path", "'PENDIENTE' as discovery_status", "cast(null as string) as error_message", "path as source_file")
             .distinct()
         )
+        append_log("Descubrimiento ejecutado en modo standalone")
         upload_errors = None
 
     # =====================================
@@ -127,9 +147,9 @@ def pyspark_transform(spark, df, param_dict):
     checkpoint_prefix = param_dict.get("checkpoint_prefix")
 
     if is_missing(bucket_raw):
-        raise ValueError("Falta parámetro requerido 'BUCKET_RAW' en tri_parametros_discovery")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'BUCKET_RAW' en tri_parametros_discovery")
     if is_missing(checkpoint_prefix):
-        raise ValueError("Falta parámetro requerido 'checkpoint_prefix'")
+        return build_status_df("FALLIDO", "Falta parámetro requerido 'checkpoint_prefix'")
 
     checkpoint_path = f"s3a://{bucket_raw}/{checkpoint_prefix}"
 
@@ -159,8 +179,10 @@ def pyspark_transform(spark, df, param_dict):
             processed = processed.where(col("path").isNotNull() & (col("path") != "")).distinct()
 
         pending = pending.join(processed, "path", "left_anti")
+        append_log("Checkpoint aplicado para excluir archivos procesados")
     except Exception:
         pending = pending.distinct()
+        append_log("Checkpoint no disponible; se continúa sin exclusión incremental")
 
     if upload_errors is not None:
         pending = pending.unionByName(upload_errors, allowMissingColumns=True)
@@ -169,4 +191,16 @@ def pyspark_transform(spark, df, param_dict):
     # Process Result Dataset Pattern
     # Retorna listado final de paths pendientes para pys_read_normalize
     # =====================================
-    return pending
+    total_pending = pending.where(col("path").isNotNull() & (col("path") != "")).count()
+    append_log(f"Archivos pendientes detectados: {total_pending}")
+
+    total_errors = 0
+    if upload_errors is not None:
+        total_errors = upload_errors.count()
+        if total_errors > 0:
+            append_log(f"Errores heredados de upload: {total_errors}")
+
+    if total_errors > 0:
+        return build_status_df("FALLIDO", f"Se detectaron {total_errors} errores heredados desde la carga")
+
+    return build_status_df("FINALIZADO", "")
