@@ -186,10 +186,15 @@ def pyspark_transform(spark, df, param_dict):
         if is_missing(relative_upload_file_path):
             return build_status_df("FALLIDO", "Falta parámetro requerido 'relative_upload_file_path'")
 
-        raw_path = f"s3a://{bucket_blob}/{relative_upload_file_path}"
+        # =====================================
+        # Raw Prefix Alignment Pattern
+        # Descubre desde /original/ para alinearse con la escritura de upload
+        # =====================================
+        raw_path = f"s3a://{bucket_blob}/{relative_upload_file_path}/original/"
         pending = (
             spark.read
             .format("binaryFile")
+            .option("recursiveFileLookup", "true")
             .load(raw_path)
             .selectExpr("path", "'PENDIENTE' as discovery_status", "cast(null as string) as error_message", "path as source_file")
             .distinct()
@@ -270,4 +275,5 @@ def pyspark_transform(spark, df, param_dict):
             ),
         )
 
-    return build_status_df("FINALIZADO", "")
+    append_log("Descubrimiento finalizado")
+    return pending
