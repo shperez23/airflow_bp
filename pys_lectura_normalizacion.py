@@ -8,6 +8,22 @@ import zipfile
 
 
 def pyspark_transform(spark, df, param_dict):
+    # =====================================
+    # Unified Status Contract Pattern
+    # Retorna contrato estándar en errores y salida funcional en éxito
+    # =====================================
+    process_log = []
+
+    def append_log(message):
+        process_log.append(message)
+
+    def build_error_df(error_message):
+        detail = str(process_log)
+        log_control = process_log[-1] if process_log else ""
+        return spark.createDataFrame(
+            [("FALLIDO", str(error_message), log_control, detail)],
+            ["estado", "error", "log_control", "log_detail"],
+        )
 
 
     # =====================================
@@ -75,6 +91,7 @@ def pyspark_transform(spark, df, param_dict):
             return None
 
     bucket_name = get_param_read_value(param_read_row, "BUCKET_BLOB")
+    append_log("Inicio pys_lectura_normalizacion")
 
     # =====================================
     # External Trigger Pattern
@@ -90,18 +107,18 @@ def pyspark_transform(spark, df, param_dict):
             try:
                 reader_options = json.loads(raw_reader)
             except json.JSONDecodeError as exc:
-                raise ValueError("Parámetro 'reader_options' no es un JSON válido") from exc
+                return build_error_df(f"Parámetro 'reader_options' no es un JSON válido: {exc}")
     elif isinstance(raw_reader, dict):
         reader_options = raw_reader
     else:
-        raise ValueError("Parámetro 'READER_OPTIONS' debe ser dict o JSON string en tri_parametros_read")
+        return build_error_df("Parámetro 'READER_OPTIONS' debe ser dict o JSON string en tri_parametros_read")
 
     # =====================================
     # Input Contract Resolver Pattern
     # Acepta distintos contratos de entrada para mantener compatibilidad
     # =====================================
     if input_df is None or not hasattr(input_df, "columns"):
-        raise ValueError(
+        return build_error_df(
             "No se encontró DataFrame de entrada para pys_read_normalize. "
             "Verifique la salida de discovery y los nombres de nodos de entrada."
         )
@@ -114,8 +131,30 @@ def pyspark_transform(spark, df, param_dict):
             "error_message",
             "coalesce(source_file, path) as source_file"
         )
+        append_log("Input de descubrimiento con paths detectado")
+    elif {"estado", "error", "log_control", "log_detail"}.issubset(input_cols):
+        relative_upload_file_path = param_dict.get("relative_upload_file_path")
+        if is_missing(bucket_name):
+            return build_error_df("Falta parámetro requerido 'BUCKET_BLOB' en tri_parametros_read")
+        if is_missing(relative_upload_file_path):
+            return build_error_df("Falta parámetro requerido 'relative_upload_file_path'")
+
+        raw_path = f"s3a://{bucket_name}/{relative_upload_file_path}"
+        files_df = (
+            spark.read
+            .format("binaryFile")
+            .load(raw_path)
+            .selectExpr(
+                "path",
+                "'PENDIENTE' as status",
+                "cast(null as string) as error_message",
+                "path as source_file"
+            )
+            .distinct()
+        )
+        append_log("Input estandarizado detectado; se ejecuta descubrimiento interno")
     else:
-        raise ValueError("El input de pys_read_normalize debe incluir la columna 'path'")
+        return build_error_df("El input de pys_read_normalize debe incluir la columna 'path'")
 
     file_rows = files_df.distinct().collect()
     files = [r.path for r in file_rows if not is_missing(r.path) and (r.status == "PENDIENTE")]
@@ -441,6 +480,7 @@ def pyspark_transform(spark, df, param_dict):
             StructField("error_stage", StringType(), True),
             StructField("error_message", StringType(), True),
         ])
+        append_log("Sin datasets ni errores para procesar")
         return spark.createDataFrame([], empty_schema)
 
     final_df = None
@@ -470,4 +510,17 @@ def pyspark_transform(spark, df, param_dict):
         else:
             final_df = final_df.unionByName(error_df, allowMissingColumns=True)
 
+    if final_df is None:
+        return build_error_df("No fue posible construir el dataframe final")
+
+    if "estado" in final_df.columns:
+        final_df = final_df.drop("estado")
+    if "error" in final_df.columns:
+        final_df = final_df.drop("error")
+    if "log_control" in final_df.columns:
+        final_df = final_df.drop("log_control")
+    if "log_detail" in final_df.columns:
+        final_df = final_df.drop("log_detail")
+
+    append_log("Lectura y normalización finalizada")
     return final_df
