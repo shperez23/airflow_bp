@@ -480,4 +480,7 @@ def pyspark_transform(spark, df, param_dict):
     if unique_uploaded_paths:
         return spark.createDataFrame([(path,) for path in unique_uploaded_paths], ["path"])
 
-    return spark.createDataFrame([], "path string")
+    if total_skip > 0:
+        return build_status_df("FALLIDO", f"No se cargaron archivos: {total_skip} archivo(s) omitido(s) por reglas de readiness/checkpoint/filtro")
+
+    return build_status_df("FALLIDO", "No se encontraron archivos válidos para cargar según la parametría recibida")
