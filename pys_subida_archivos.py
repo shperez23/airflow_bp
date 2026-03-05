@@ -287,6 +287,7 @@ def pyspark_transform(spark, df, param_dict):
         pass
 
     resultados = []
+    uploaded_paths = []
     checkpoint_records = []
 
     # =====================================
@@ -405,6 +406,7 @@ def pyspark_transform(spark, df, param_dict):
                     processed_signatures.add(signature)
 
                     resultados.append((remoto, s3_key, "PROCESADO", "CARGA", ""))
+                    uploaded_paths.append(f"s3a://{bucket_name}/{s3_key}")
                     append_log(f"Archivo procesado con éxito: {remoto}")
 
                     os.remove(tmp_file)
@@ -449,4 +451,10 @@ def pyspark_transform(spark, df, param_dict):
     if total_error > 0:
         return build_status_df("FALLIDO", f"Se encontraron {total_error} errores durante la carga")
 
-    return build_status_df("FINALIZADO", "")
+    unique_uploaded_paths = sorted(set(uploaded_paths))
+    append_log(f"Total archivos cargados en /original/: {len(unique_uploaded_paths)}")
+
+    if unique_uploaded_paths:
+        return spark.createDataFrame([(path,) for path in unique_uploaded_paths], ["path"])
+
+    return spark.createDataFrame([], "path string")
