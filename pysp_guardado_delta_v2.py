@@ -128,6 +128,49 @@ def pyspark_transform(spark, df, param_dict):
             .collect()[0][0]
         )
 
+    # =====================================
+    # Upstream Error Passthrough Pattern
+    # Si lectura/normalización envía contrato estandarizado FALLIDO,
+    # devolver contrato de salida de guardado sin ejecutar lógica interna.
+    # =====================================
+    standardized_cols = {"estado", "error", "log_control", "log_detail"}
+    if standardized_cols.issubset(set(input_df.columns)):
+        upstream_status_row = input_df.selectExpr(
+            "estado",
+            "error",
+            "log_control",
+            "log_detail",
+        ).first()
+        if upstream_status_row is not None and str(upstream_status_row.estado).upper() == "FALLIDO":
+            fecha_passthrough = get_fecha_sql()
+            passthrough_record = {
+                "id_ingesta": "",
+                "fecha_inicio": fecha_passthrough,
+                "estado": str(upstream_status_row.estado),
+                "fecha_fin": fecha_passthrough,
+                "cantidad_insertados": 0,
+                "error": str(upstream_status_row.error),
+                "rango_ini_procesado": "",
+                "rango_fin_procesado": "",
+                "id_control": 0,
+                "punto_control": "",
+                "p_columna_delta_tipo_dato": "",
+                "log_control": str(upstream_status_row.log_control),
+                "log1": "",
+                "error1": "",
+                "checksum_source": 0,
+                "checksum_destination": 0,
+                "cantidad_leidos": 0,
+                "is_stock_delta": 0,
+                "log_detail": str(upstream_status_row.log_detail),
+                "coleccion_salida": "",
+                "nombre_tabla": "",
+                "root_metada_path": "",
+                "tiene_shist": "0",
+                "objeto_existe": 0,
+            }
+            return spark.createDataFrame([passthrough_record]).selectExpr("*")
+
     def default_ingest_record():
         fecha_actual = get_fecha_sql()
         return {
