@@ -1,4 +1,4 @@
-from pyspark.sql.functions import current_timestamp, lit, col
+from pyspark.sql.functions import current_timestamp, lit, col, regexp_extract
 from pyspark.sql.types import StructType, StructField, StringType
 import uuid
 import json
@@ -534,6 +534,28 @@ def pyspark_transform(spark, df, param_dict):
         final_df = final_df.drop("log_control")
     if "log_detail" in final_df.columns:
         final_df = final_df.drop("log_detail")
+
+    if not error_records:
+        base_columns = [
+            c for c in final_df.columns
+            if c not in {
+                "ingestion_ts",
+                "source_file",
+                "path",
+                "dataset",
+                "record_status",
+                "error_stage",
+                "error_message",
+                "batch_id",
+            }
+        ]
+
+        final_df = (
+            final_df
+            .withColumn("fecha_ingesta", col("ingestion_ts"))
+            .withColumn("nombre_archivo", regexp_extract(col("source_file"), r"([^/]+)$", 1))
+            .select(*base_columns, "fecha_ingesta", "batch_id", "nombre_archivo")
+        )
 
     append_log("Lectura y normalización finalizada")
     return final_df
