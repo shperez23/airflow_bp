@@ -94,6 +94,19 @@ def pyspark_transform(spark, df, param_dict):
     append_log("Inicio pys_lectura_normalizacion")
 
     # =====================================
+    # Upstream Error Passthrough Pattern
+    # Si discovery envía contrato estandarizado FALLIDO, se propaga sin procesamiento interno
+    # =====================================
+    if input_df is not None and hasattr(input_df, "columns"):
+        upstream_input_cols = set(input_df.columns)
+        has_standardized_contract = {"estado", "error", "log_control", "log_detail"}.issubset(upstream_input_cols)
+
+        if has_standardized_contract:
+            upstream_status_row = input_df.selectExpr("estado", "error", "log_control", "log_detail").first()
+            if upstream_status_row is not None and str(upstream_status_row.estado).upper() == "FALLIDO":
+                return input_df.select("estado", "error", "log_control", "log_detail")
+
+    # =====================================
     # External Trigger Pattern
     # Resuelve parámetros de ejecución enviados por el orquestador (Rocket/Airflow)
     # =====================================
