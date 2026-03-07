@@ -1,0 +1,146 @@
+%% Diagrama compatible con draw.io:
+%% draw.io -> Arrange -> Insert -> Advanced -> Mermaid
+sequenceDiagram
+    autonumber
+    actor Orch as Orquestador/Airflow
+    participant Job as pyspark_transform()
+    participant Spark as Spark Session
+    participant SFTP as Servidor SFTP
+    participant S3 as Amazon S3
+    participant FS as /tmp local
+    participant CP as Checkpoint Parquet
+
+    rect rgb(240, 248, 255)
+    Note over Orch,Job: Subproceso 1 - Inicio y contrato de estado
+    Orch->>Job: Ejecutar función con (spark, df, param_dict)
+    Job->>Job: Inicializar process_log, append_log(), build_status_df()
+    Job->>Job: append_log("Inicio pys_subida_archivos")
+    end
+
+    rect rgb(245, 255, 245)
+    Note over Job,Spark: Subproceso 2 - Validación de entrada y parametría
+    Job->>Spark: Validar columnas requeridas en df
+    alt Faltan columnas requeridas
+        Job-->>Orch: DataFrame estado=FALLIDO + detalle
+    else Columnas OK
+        Job->>Spark: df.first() para leer param_row
+        alt DataFrame vacío o error de lectura
+            Job-->>Orch: DataFrame estado=FALLIDO + error
+        else Parámetros leídos
+            Job->>Job: Normalizar SFTP_HOST, SFTP_PORT, SFTP_PATH, BUCKET_BLOB, etc.
+            alt Falta parámetro obligatorio
+                Job-->>Orch: DataFrame estado=FALLIDO + parámetro faltante
+            else Parámetros mínimos completos
+                Job->>Spark: Leer credenciales spark.db.<vault>.user/pass
+                alt Credenciales ausentes
+                    Job-->>Orch: DataFrame estado=FALLIDO + credenciales faltantes
+                end
+            end
+        end
+    end
+    end
+
+    rect rgb(255, 250, 240)
+    Note over Job,S3: Subproceso 3 - Configuración técnica de carga
+    Job->>Job: Construir expected_filenames(fecha_desde, fecha_hasta)
+    alt Ventana de fechas inválida
+        Job-->>Orch: DataFrame estado=FALLIDO + error de fechas
+    else Nombres esperados generados
+        Job->>Spark: Leer access_key/secret_key de SparkConf
+        Job->>S3: Inicializar sesión boto3 + cliente S3
+        alt Error inicializando cliente S3
+            Job-->>Orch: DataFrame estado=FALLIDO + error S3
+        else Cliente S3 OK
+            Job->>Job: Resolver max_concurrency/use_threads/multipart
+            Job->>Job: Definir rutas CHECKPOINT, RAW_PREFIX, UNCOMP_PREFIX, QUARANTINE
+        end
+    end
+    end
+
+    rect rgb(255, 245, 250)
+    Note over Job,CP: Subproceso 4 - Recuperación de estado incremental
+    Job->>CP: spark.read.parquet(CHECKPOINT)
+    alt Checkpoint disponible
+        CP-->>Job: Historial (hash, relative_path, remote_size, remote_mtime)
+        Job->>Job: Poblar processed_hashes y processed_signatures
+    else No existe checkpoint o falla lectura
+        Job->>Job: Continuar sin estado previo
+    end
+    end
+
+    rect rgb(245, 245, 255)
+    Note over Job,SFTP: Subproceso 5 - Descubrimiento en SFTP
+    Job->>SFTP: Abrir conexión pysftp.Connection(...)
+    alt Falla conexión SFTP
+        Job-->>Orch: DataFrame estado=FALLIDO + detalle
+    else Conexión establecida
+        Job->>SFTP: list_files_recursive(sftp_path)
+        SFTP-->>Job: Lista de archivos remotos
+        Job->>Job: append_log(cantidad descubierta)
+    end
+    end
+
+    rect rgb(255, 255, 235)
+    Note over Job,FS: Subproceso 6 - Ciclo por archivo (filtro/readiness/idempotencia)
+    loop Por cada archivo remoto descubierto
+        Job->>Job: Calcular rel_path y remote_filename
+        alt Nombre NO está en expected_filenames
+            Job->>Job: skip silencioso por filtro de nombre
+        else Nombre esperado
+            Job->>SFTP: stat(remoto) -> size1, mtime1
+            Job->>Job: Armar signature=(rel_path,size1,mtime1)
+            alt signature ya procesada
+                Job->>Job: Registrar OMITIDO_YA_PROCESADO (metadata checkpoint)
+            else signature nueva
+                Job->>Job: Evaluar antigüedad y readiness
+                alt Archivo en copia activa o tamaño 0
+                    Job->>Job: Registrar OMITIDO_NO_LISTO
+                else Archivo listo
+                    Job->>SFTP: Descargar archivo a /tmp (sftp.get)
+                    SFTP-->>FS: Guardar tmp_file
+                    Job->>FS: Calcular hash SHA-256
+                    alt Hash ya procesado
+                        Job->>FS: Eliminar tmp_file
+                        Job->>Job: Registrar OMITIDO_YA_PROCESADO (hash)
+                    else Hash nuevo
+                        Job->>S3: upload_file(tmp_file, RAW_PREFIX+rel_path)
+                        Job->>FS: Detectar si el binario es gzip real
+                        alt Es gzip
+                            Job->>FS: Descomprimir en tmp_uncomp
+                            Job->>S3: upload_file(tmp_uncomp, UNCOMP_PREFIX+rel_path_sin_gz)
+                            Job->>FS: Eliminar tmp_uncomp
+                        end
+                        Job->>Job: Agregar checkpoint_records + resultados=PROCESADO
+                        Job->>Job: Agregar uploaded_paths y actualizar sets en memoria
+                        Job->>FS: Eliminar tmp_file
+                    end
+                end
+            end
+        end
+    end
+    end
+
+    rect rgb(240, 255, 255)
+    Note over Job,CP: Subproceso 7 - Persistencia de checkpoint
+    alt Existen checkpoint_records
+        Job->>Spark: Crear DataFrame meta + ingestion_ts
+        Job->>CP: write.mode("append").parquet(CHECKPOINT)
+        Job->>Job: append_log(cantidad persistida)
+    else Sin nuevos registros
+        Job->>Job: No persiste checkpoint
+    end
+    end
+
+    rect rgb(255, 240, 240)
+    Note over Job,Orch: Subproceso 8 - Cierre y respuesta al orquestador
+    Job->>Job: Calcular total_ok, total_error, total_skip
+    alt total_error > 0
+        Job-->>Orch: DataFrame estado=FALLIDO + resumen de errores
+    else total_ok > 0
+        Job-->>Orch: DataFrame con lista única de paths s3a://.../original/
+    else total_skip > 0
+        Job-->>Orch: DataFrame estado=FALLIDO (omitidos)
+    else Sin archivos válidos
+        Job-->>Orch: DataFrame estado=FALLIDO (sin hallazgos)
+    end
+    end
