@@ -1,0 +1,96 @@
+<mxfile host="app.diagrams.net" modified="2026-03-08T00:00:00.000Z" agent="codex" version="24.7.17">
+  <diagram id="pys-descubrimiento-flow" name="pys_descubrimiento_archivos">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="sp0" value="SP0 Inicializacion y contrato de estado" style="swimlane;horizontal=0;startSize=30;rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="330" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="sp1" value="SP1 Resolucion de entradas y parametros" style="swimlane;horizontal=0;startSize=30;rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="370" y="20" width="340" height="340" as="geometry"/>
+        </mxCell>
+        <mxCell id="sp2" value="SP2 Construccion de pendientes" style="swimlane;horizontal=0;startSize=30;rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="730" y="20" width="360" height="540" as="geometry"/>
+        </mxCell>
+        <mxCell id="sp3" value="SP3 Filtro incremental por checkpoint" style="swimlane;horizontal=0;startSize=30;rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="20" width="360" height="500" as="geometry"/>
+        </mxCell>
+        <mxCell id="sp4" value="SP4 Cierre y salida" style="swimlane;horizontal=0;startSize=30;rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1490" y="20" width="330" height="260" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="a0" value="Inicio pyspark_transform" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp0"><mxGeometry x="20" y="50" width="290" height="40" as="geometry"/></mxCell>
+        <mxCell id="a1" value="Crear process_log append_log build_status_df" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp0"><mxGeometry x="20" y="105" width="290" height="45" as="geometry"/></mxCell>
+        <mxCell id="a2" value="Definir is_missing" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp0"><mxGeometry x="20" y="165" width="290" height="40" as="geometry"/></mxCell>
+        <mxCell id="a3" value="Log inicio pys_descubrimiento_archivos" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp0"><mxGeometry x="20" y="220" width="290" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="b1" value="Resolver upload_df y param_discovery_row" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="20" y="50" width="300" height="45" as="geometry"/></mxCell>
+        <mxCell id="b2" value="Extraer bucket_blob y bucket_raw" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="20" y="110" width="300" height="40" as="geometry"/></mxCell>
+        <mxCell id="b3" value="Tiene contrato estandarizado?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="85" y="165" width="170" height="75" as="geometry"/></mxCell>
+        <mxCell id="b4" value="Tiene contrato path?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="85" y="255" width="170" height="75" as="geometry"/></mxCell>
+
+        <mxCell id="c1" value="Leer upload_status_row" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="20" y="50" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="c2" value="Estado FALLIDO?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="95" y="105" width="170" height="75" as="geometry"/></mxCell>
+        <mxCell id="c3" value="Retornar contrato estandarizado de error" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="sp2"><mxGeometry x="20" y="195" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="c4" value="Retornar FALLIDO sin paths" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="sp2"><mxGeometry x="20" y="250" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="c5" value="Construir pending desde path" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="20" y="305" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="c6" value="Standalone: validar bucket_blob y relative_upload_file_path" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="20" y="360" width="320" height="50" as="geometry"/></mxCell>
+        <mxCell id="c7" value="Leer binaryFile de /original y construir pending" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="20" y="425" width="320" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="d1" value="Validar bucket_raw y checkpoint_prefix" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="20" y="50" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="d2" value="Intentar leer parquet checkpoint" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="20" y="105" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="d3" value="Adaptar contrato path/source_file" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="20" y="160" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="d4" value="Left anti join pending vs processed" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="20" y="215" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="d5" value="Log checkpoint aplicado" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="20" y="270" width="320" height="40" as="geometry"/></mxCell>
+        <mxCell id="d6" value="Excepcion: pending distinct y log fallback" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;" vertex="1" parent="sp3"><mxGeometry x="20" y="330" width="320" height="45" as="geometry"/></mxCell>
+
+        <mxCell id="e1" value="Contar total_pending valido" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="20" y="50" width="290" height="40" as="geometry"/></mxCell>
+        <mxCell id="e2" value="Log archivos pendientes detectados" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="20" y="105" width="290" height="40" as="geometry"/></mxCell>
+        <mxCell id="e3" value="Log descubrimiento finalizado" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="20" y="160" width="290" height="40" as="geometry"/></mxCell>
+        <mxCell id="e4" value="Retornar pending" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="sp4"><mxGeometry x="20" y="215" width="290" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="x1" value="FALLIDO falta BUCKET_BLOB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="760" y="610" width="300" height="40" as="geometry"/></mxCell>
+        <mxCell id="x2" value="FALLIDO falta relative_upload_file_path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="760" y="660" width="300" height="40" as="geometry"/></mxCell>
+        <mxCell id="x3" value="FALLIDO falta BUCKET_RAW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1135" y="610" width="300" height="40" as="geometry"/></mxCell>
+        <mxCell id="x4" value="FALLIDO falta checkpoint_prefix" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1135" y="660" width="300" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="ea0" edge="1" parent="1" source="a0" target="a1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ea1" edge="1" parent="1" source="a1" target="a2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ea2" edge="1" parent="1" source="a2" target="a3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ea3" edge="1" parent="1" source="a3" target="b1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="eb0" edge="1" parent="1" source="b1" target="b2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="eb1" edge="1" parent="1" source="b2" target="b3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="eb2" edge="1" parent="1" source="b3" target="c1" value="Si" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="eb3" edge="1" parent="1" source="b3" target="b4" value="No" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="eb4" edge="1" parent="1" source="b4" target="c5" value="Si" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="eb5" edge="1" parent="1" source="b4" target="c6" value="No" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="ec0" edge="1" parent="1" source="c1" target="c2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ec1" edge="1" parent="1" source="c2" target="c3" value="Si" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ec2" edge="1" parent="1" source="c2" target="c4" value="No" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ec3" edge="1" parent="1" source="c5" target="d1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ec4" edge="1" parent="1" source="c6" target="c7" value="Ok" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ec5" edge="1" parent="1" source="c7" target="d1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ec6" edge="1" parent="1" source="c6" target="x1" value="Sin BUCKET_BLOB" style="endArrow=block;html=1;dashed=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ec7" edge="1" parent="1" source="c6" target="x2" value="Sin relative_upload_file_path" style="endArrow=block;html=1;dashed=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="ed0" edge="1" parent="1" source="d1" target="d2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed1" edge="1" parent="1" source="d2" target="d3" value="Exito" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed2" edge="1" parent="1" source="d3" target="d4" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed3" edge="1" parent="1" source="d4" target="d5" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed4" edge="1" parent="1" source="d5" target="e1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed5" edge="1" parent="1" source="d2" target="d6" value="Excepcion" style="endArrow=block;html=1;dashed=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed6" edge="1" parent="1" source="d6" target="e1" style="endArrow=block;html=1;dashed=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed7" edge="1" parent="1" source="d1" target="x3" value="Sin BUCKET_RAW" style="endArrow=block;html=1;dashed=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ed8" edge="1" parent="1" source="d1" target="x4" value="Sin checkpoint_prefix" style="endArrow=block;html=1;dashed=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="ee0" edge="1" parent="1" source="e1" target="e2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ee1" edge="1" parent="1" source="e2" target="e3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ee2" edge="1" parent="1" source="e3" target="e4" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
