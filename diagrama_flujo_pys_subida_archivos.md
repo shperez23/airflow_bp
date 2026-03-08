@@ -24,11 +24,11 @@ B3[Leer primera fila param_row]
 B4{¿param_row es None?}
 B5[Extraer parámetros de fila\nhost/port/vault/nombre/fechas/path/bucket]
 B6{¿Falta algún requerido?}
-B7[Leer credenciales spark.db.<vault>.user/pass]
+B7[Leer credenciales spark db vault user pass]
 B8{¿Credenciales válidas?}
 B9[Leer rutas param_dict\nrelative_upload_file_path/control_path]
 B10{¿Rutas/bucket válidos?}
-B11[Construir expected_filenames\n(según fecha_desde/fecha_hasta)]
+B11[Construir expected filenames con fecha desde y fecha hasta]
 B12{¿Fechas válidas?}
 end
 
@@ -36,7 +36,7 @@ subgraph SP2[Subproceso 2: Preparación de conectores y políticas]
 direction TB
 C1[Crear cliente S3 con credenciales s3a]
 C2{¿S3 inicializado?}
-C3[Configurar TransferConfig\n(multipart, concurrencia, hilos)]
+C3[Configurar TransferConfig multipart concurrencia hilos]
 C4[Definir rutas\nCHECKPOINT, QUARANTINE, RAW_PREFIX, UNCOMP_PREFIX]
 C5[Definir helpers de ejecución\nfile_hash y list_files_recursive]
 end
@@ -55,7 +55,7 @@ E1[Abrir conexión SFTP]
 E2[Listar archivos recursivamente desde SFTP_PATH]
 E3[Iterar cada remoto]
 E4[Calcular rel_path, remote_filename, tmp_file]
-E5{¿remote_filename ∈ expected_filenames?}
+E5{remote filename en expected filenames}
 E6[Leer stat inicial\nsize1/mtime1 + signature]
 E7{¿signature ya procesada?}
 E8[Readiness check:\nesperar y comparar size1 vs size2]
@@ -83,8 +83,8 @@ F6[Deduplicar uploaded_paths]
 F7{¿Hay archivos cargados?}
 F8[Retornar DataFrame(path) con rutas s3a]
 F9{¿Hubo omitidos?}
-F10[Retornar FALLIDO por omitidos\n(readiness/checkpoint/filtro)]
-F11[Retornar FALLIDO\n(no hubo archivos válidos)]
+F10[Retornar FALLIDO por omitidos readiness checkpoint filtro]
+F11[Retornar FALLIDO no hubo archivos validos]
 end
 
 %% =====================
