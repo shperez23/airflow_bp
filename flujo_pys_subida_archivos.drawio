@@ -1,0 +1,139 @@
+<mxfile host="app.diagrams.net" modified="2026-03-13T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="flujo-subida" name="Flujo pys_subida_archivos">
+    <mxGraphModel dx="2200" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3200" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="sp1" value="Subproceso 1: Inicialización y contrato de entrada" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="20" y="40" width="340" height="1180" as="geometry"/></mxCell>
+        <mxCell id="sp2" value="Subproceso 2: Validaciones, secretos y configuración" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="380" y="40" width="340" height="1180" as="geometry"/></mxCell>
+        <mxCell id="sp3" value="Subproceso 3: Checkpoint e idempotencia" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="740" y="40" width="320" height="1180" as="geometry"/></mxCell>
+        <mxCell id="sp4" value="Subproceso 4: Descubrimiento y filtro SFTP" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="1080" y="40" width="340" height="1180" as="geometry"/></mxCell>
+        <mxCell id="sp5" value="Subproceso 5: Descarga y subida S3" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="1440" y="40" width="340" height="1180" as="geometry"/></mxCell>
+        <mxCell id="sp6" value="Subproceso 6: Persistencia checkpoint" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="1800" y="40" width="320" height="1180" as="geometry"/></mxCell>
+        <mxCell id="sp7" value="Subproceso 7: Resultado y finalización" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="2140" y="40" width="340" height="1180" as="geometry"/></mxCell>
+
+        <mxCell id="n1" value="Inicio" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="110" y="50" width="120" height="45" as="geometry"/></mxCell>
+        <mxCell id="n2" value="Inicializar logs y helpers" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="70" y="120" width="200" height="55" as="geometry"/></mxCell>
+        <mxCell id="n3" value="Validar columnas requeridas y leer param_row" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="50" y="200" width="240" height="70" as="geometry"/></mxCell>
+        <mxCell id="d1" value="¿Entrada válida?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="90" y="300" width="160" height="80" as="geometry"/></mxCell>
+        <mxCell id="f1" value="FALLIDO" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp1"><mxGeometry x="120" y="410" width="100" height="45" as="geometry"/></mxCell>
+        <mxCell id="A" value="A" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp1"><mxGeometry x="130" y="500" width="60" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="a1" value="A" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp2"><mxGeometry x="140" y="50" width="60" height="60" as="geometry"/></mxCell>
+        <mxCell id="n4" value="Obtener credenciales desde spark.conf" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="55" y="130" width="230" height="60" as="geometry"/></mxCell>
+        <mxCell id="d2" value="¿Credenciales + rutas + bucket válidos?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="70" y="220" width="200" height="95" as="geometry"/></mxCell>
+        <mxCell id="f2" value="FALLIDO" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="120" y="340" width="100" height="45" as="geometry"/></mxCell>
+        <mxCell id="n5" value="Construir expected_filenames y cliente S3" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="55" y="420" width="230" height="65" as="geometry"/></mxCell>
+        <mxCell id="n6" value="Definir TransferConfig + prefijos CHECKPOINT/RAW/UNCOMP/QUARANTINE" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp2"><mxGeometry x="45" y="510" width="250" height="75" as="geometry"/></mxCell>
+        <mxCell id="B" value="B" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp2"><mxGeometry x="140" y="610" width="60" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="b1" value="B" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp3"><mxGeometry x="130" y="50" width="60" height="60" as="geometry"/></mxCell>
+        <mxCell id="n7" value="Intentar leer checkpoint parquet" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="50" y="130" width="220" height="60" as="geometry"/></mxCell>
+        <mxCell id="d3" value="¿Checkpoint disponible?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="80" y="220" width="160" height="80" as="geometry"/></mxCell>
+        <mxCell id="n8" value="Cargar hashes y firmas" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="75" y="330" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="n9" value="Continuar sin checkpoint (fallback)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp3"><mxGeometry x="65" y="405" width="190" height="55" as="geometry"/></mxCell>
+        <mxCell id="C" value="C" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp3"><mxGeometry x="130" y="490" width="60" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="c1" value="C" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp4"><mxGeometry x="140" y="50" width="60" height="60" as="geometry"/></mxCell>
+        <mxCell id="n10" value="Conectar SFTP y listar archivos recursivamente" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="55" y="130" width="230" height="65" as="geometry"/></mxCell>
+        <mxCell id="d4" value="¿Archivo coincide con expected_filenames?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="65" y="220" width="210" height="95" as="geometry"/></mxCell>
+        <mxCell id="d5" value="¿Ya procesado por firma metadata?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="75" y="340" width="190" height="90" as="geometry"/></mxCell>
+        <mxCell id="d6" value="¿Archivo listo? (size estable y &gt;0)" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="75" y="455" width="190" height="90" as="geometry"/></mxCell>
+        <mxCell id="n11" value="Registrar OMITIDO_* y continuar loop" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp4"><mxGeometry x="70" y="570" width="200" height="55" as="geometry"/></mxCell>
+        <mxCell id="D" value="D" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp4"><mxGeometry x="140" y="650" width="60" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="d1p" value="D" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp5"><mxGeometry x="140" y="50" width="60" height="60" as="geometry"/></mxCell>
+        <mxCell id="n12" value="Descargar a tmp y calcular hash" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp5"><mxGeometry x="70" y="130" width="200" height="60" as="geometry"/></mxCell>
+        <mxCell id="d7" value="¿Hash ya procesado?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp5"><mxGeometry x="90" y="220" width="160" height="80" as="geometry"/></mxCell>
+        <mxCell id="n13" value="Subir original a S3 (RAW)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp5"><mxGeometry x="90" y="330" width="160" height="55" as="geometry"/></mxCell>
+        <mxCell id="d8" value="¿Es gzip real?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp5"><mxGeometry x="95" y="410" width="150" height="80" as="geometry"/></mxCell>
+        <mxCell id="n14" value="Descomprimir y subir versión UNCOMP" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp5"><mxGeometry x="75" y="515" width="190" height="60" as="geometry"/></mxCell>
+        <mxCell id="n15" value="Registrar checkpoint_record + PROCESADO" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp5"><mxGeometry x="70" y="600" width="200" height="60" as="geometry"/></mxCell>
+        <mxCell id="n16" value="En excepción: subir a QUARANTINE y registrar ERROR_CARGA" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp5"><mxGeometry x="55" y="685" width="230" height="65" as="geometry"/></mxCell>
+        <mxCell id="CL" value="C-LOOP" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp5"><mxGeometry x="130" y="775" width="80" height="80" as="geometry"/></mxCell>
+
+        <mxCell id="cl1" value="C-LOOP" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp6"><mxGeometry x="120" y="50" width="80" height="80" as="geometry"/></mxCell>
+        <mxCell id="d9" value="¿Quedan archivos por iterar?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp6"><mxGeometry x="90" y="160" width="140" height="85" as="geometry"/></mxCell>
+        <mxCell id="n17" value="Persistir checkpoint_records (append parquet)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp6"><mxGeometry x="60" y="280" width="200" height="65" as="geometry"/></mxCell>
+        <mxCell id="d10" value="¿Fallo general SFTP?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp6"><mxGeometry x="95" y="375" width="130" height="80" as="geometry"/></mxCell>
+        <mxCell id="f3" value="FALLIDO" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp6"><mxGeometry x="110" y="485" width="100" height="45" as="geometry"/></mxCell>
+        <mxCell id="E" value="E" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp6"><mxGeometry x="130" y="560" width="60" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="e1" value="E" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="sp7"><mxGeometry x="140" y="50" width="60" height="60" as="geometry"/></mxCell>
+        <mxCell id="n18" value="Calcular totales PROCESADO/ERROR/OMITIDO" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="55" y="130" width="230" height="60" as="geometry"/></mxCell>
+        <mxCell id="d11" value="¿total_error &gt; 0?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="95" y="220" width="150" height="80" as="geometry"/></mxCell>
+        <mxCell id="ff1" value="Fin FALLIDO: hubo errores" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="85" y="330" width="170" height="45" as="geometry"/></mxCell>
+        <mxCell id="d12" value="¿Hay uploaded_paths?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="95" y="400" width="150" height="80" as="geometry"/></mxCell>
+        <mxCell id="ok1" value="Fin ÉXITO: DataFrame(path)" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="90" y="510" width="160" height="45" as="geometry"/></mxCell>
+        <mxCell id="d13" value="¿Hubo omitidos?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="105" y="580" width="130" height="80" as="geometry"/></mxCell>
+        <mxCell id="ff2" value="Fin FALLIDO: omitidos" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="95" y="685" width="150" height="45" as="geometry"/></mxCell>
+        <mxCell id="ff3" value="Fin FALLIDO: sin archivos válidos" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="sp7"><mxGeometry x="75" y="750" width="190" height="45" as="geometry"/></mxCell>
+
+        <mxCell id="e1a" edge="1" parent="1" source="n1" target="n2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e1b" edge="1" parent="1" source="n2" target="n3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e1c" edge="1" parent="1" source="n3" target="d1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e1d" value="No" edge="1" parent="1" source="d1" target="f1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e1e" value="Sí" edge="1" parent="1" source="d1" target="A" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e1f" edge="1" parent="1" source="A" target="a1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e2a" edge="1" parent="1" source="a1" target="n4" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2b" edge="1" parent="1" source="n4" target="d2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2c" value="No" edge="1" parent="1" source="d2" target="f2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2d" value="Sí" edge="1" parent="1" source="d2" target="n5" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2e" edge="1" parent="1" source="n5" target="n6" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2f" edge="1" parent="1" source="n6" target="B" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2g" edge="1" parent="1" source="B" target="b1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e3a" edge="1" parent="1" source="b1" target="n7" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3b" edge="1" parent="1" source="n7" target="d3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3c" value="Sí" edge="1" parent="1" source="d3" target="n8" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3d" value="No" edge="1" parent="1" source="d3" target="n9" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3e" edge="1" parent="1" source="n8" target="C" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3f" edge="1" parent="1" source="n9" target="C" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3g" edge="1" parent="1" source="C" target="c1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e4a" edge="1" parent="1" source="c1" target="n10" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4b" edge="1" parent="1" source="n10" target="d4" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4c" value="Sí" edge="1" parent="1" source="d4" target="d5" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4d" value="No" edge="1" parent="1" source="d4" target="n11" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4e" value="Sí" edge="1" parent="1" source="d5" target="n11" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4f" value="No" edge="1" parent="1" source="d5" target="d6" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4g" value="No" edge="1" parent="1" source="d6" target="n11" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4h" value="Sí" edge="1" parent="1" source="d6" target="D" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4i" edge="1" parent="1" source="n11" target="c1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4j" edge="1" parent="1" source="D" target="d1p" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e5a" edge="1" parent="1" source="d1p" target="n12" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5b" edge="1" parent="1" source="n12" target="d7" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5c" value="Sí" edge="1" parent="1" source="d7" target="CL" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5d" value="No" edge="1" parent="1" source="d7" target="n13" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5e" edge="1" parent="1" source="n13" target="d8" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5f" value="Sí" edge="1" parent="1" source="d8" target="n14" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5g" value="No" edge="1" parent="1" source="d8" target="n15" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5h" edge="1" parent="1" source="n14" target="n15" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5i" edge="1" parent="1" source="n15" target="CL" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5j" value="Excepción" edge="1" parent="1" source="n12" target="n16" style="dashed=1;endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5k" edge="1" parent="1" source="n16" target="CL" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5l" edge="1" parent="1" source="CL" target="cl1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e6a" edge="1" parent="1" source="cl1" target="d9" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6b" value="Sí" edge="1" parent="1" source="d9" target="c1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6c" value="No" edge="1" parent="1" source="d9" target="n17" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6d" edge="1" parent="1" source="n17" target="d10" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6e" value="Sí" edge="1" parent="1" source="d10" target="f3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6f" value="No" edge="1" parent="1" source="d10" target="E" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6g" edge="1" parent="1" source="E" target="e1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e7a" edge="1" parent="1" source="e1" target="n18" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7b" edge="1" parent="1" source="n18" target="d11" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7c" value="Sí" edge="1" parent="1" source="d11" target="ff1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7d" value="No" edge="1" parent="1" source="d11" target="d12" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7e" value="Sí" edge="1" parent="1" source="d12" target="ok1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7f" value="No" edge="1" parent="1" source="d12" target="d13" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7g" value="Sí" edge="1" parent="1" source="d13" target="ff2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7h" value="No" edge="1" parent="1" source="d13" target="ff3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
