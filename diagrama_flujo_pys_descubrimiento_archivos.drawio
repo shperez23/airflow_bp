@@ -1,0 +1,59 @@
+<mxfile host="app.diagrams.net" modified="2026-03-13T00:00:00.000Z" agent="Codex" version="24.7.7">
+  <diagram id="pys-descubrimiento" name="Page-1">
+    <mxGraphModel dx="1640" dy="916" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="b1" value="Subproceso 1: Inicialización y resolución de entradas" style="swimlane;fontStyle=1;horizontal=1;startSize=30;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="480" height="620" as="geometry"/>
+        </mxCell>
+        <mxCell id="b1i" value="INICIO_BLOQUE_1" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b1"><mxGeometry x="130" y="50" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="b1a" value="Inicializa process_log, append_log y build_status_df" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b1"><mxGeometry x="90" y="130" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b1b" value="Registra inicio del proceso" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b1"><mxGeometry x="90" y="220" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b1c" value="Resuelve upload_df y tri_parametros_discovery" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b1"><mxGeometry x="90" y="310" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b1d" value="Extrae BUCKET_BLOB y BUCKET_RAW" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b1"><mxGeometry x="90" y="400" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b1f" value="FIN_BLOQUE_1" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b1"><mxGeometry x="130" y="500" width="220" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="b2" value="Subproceso 2: Construcción de candidatos pendientes" style="swimlane;fontStyle=1;horizontal=1;startSize=30;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="560" y="40" width="480" height="920" as="geometry"/>
+        </mxCell>
+        <mxCell id="b2i" value="INICIO_BLOQUE_2" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="130" y="50" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="b2a" value="¿Contrato estandarizado?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="150" y="130" width="180" height="90" as="geometry"/></mxCell>
+        <mxCell id="b2b" value="¿estado == FALLIDO?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="150" y="250" width="180" height="90" as="geometry"/></mxCell>
+        <mxCell id="b2c" value="Retorna estado/error/log recibido" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="90" y="370" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b2d" value="Retorna FALLIDO por contrato sin paths" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="90" y="450" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b2e" value="¿Contrato con columna path?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="150" y="530" width="180" height="90" as="geometry"/></mxCell>
+        <mxCell id="b2f" value="Construye pending desde upload_df(path)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="90" y="650" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b2g" value="Modo standalone: valida BUCKET_BLOB y relative_upload_file_path" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="90" y="730" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b2h" value="Lee s3a://BUCKET_BLOB/.../original/ y construye pending" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="90" y="810" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b2fi" value="FIN_BLOQUE_2" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b2"><mxGeometry x="130" y="880" width="220" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="b3" value="Subproceso 3: Aplicación de checkpoint" style="swimlane;fontStyle=1;horizontal=1;startSize=30;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="40" width="480" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="b3i" value="INICIO_BLOQUE_3" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="130" y="50" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="b3a" value="Valida BUCKET_RAW y checkpoint_prefix" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="90" y="130" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b3b" value="Define checkpoint_path" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="90" y="220" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b3c" value="¿Lectura parquet checkpoint OK?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="150" y="310" width="180" height="90" as="geometry"/></mxCell>
+        <mxCell id="b3d" value="Adapta contrato: path/source_file -&gt; path" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="90" y="430" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b3e" value="Excluye procesados con left_anti join" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="90" y="510" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b3f" value="Continúa sin exclusión incremental" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="90" y="590" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b3fi" value="FIN_BLOQUE_3" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b3"><mxGeometry x="130" y="670" width="220" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="b4" value="Subproceso 4: Cierre y retorno" style="swimlane;fontStyle=1;horizontal=1;startSize=30;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1600" y="40" width="480" height="500" as="geometry"/>
+        </mxCell>
+        <mxCell id="b4i" value="INICIO_BLOQUE_4" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b4"><mxGeometry x="130" y="50" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="b4a" value="Cuenta total_pending (paths válidos)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b4"><mxGeometry x="90" y="130" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b4b" value="Registra log de pendientes y finalización" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="b4"><mxGeometry x="90" y="220" width="300" height="60" as="geometry"/></mxCell>
+        <mxCell id="b4c" value="RETORNA pending" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b4"><mxGeometry x="130" y="310" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="b4f" value="FIN_BLOQUE_4" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="b4"><mxGeometry x="130" y="380" width="220" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="e1" style="endArrow=block;html=1;" edge="1" parent="1" source="b1f" target="b2i"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;" edge="1" parent="1" source="b2fi" target="b3i"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="endArrow=block;html=1;" edge="1" parent="1" source="b3fi" target="b4i"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
