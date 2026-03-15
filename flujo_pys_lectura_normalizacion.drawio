@@ -1,0 +1,175 @@
+<mxfile host="app.diagrams.net" modified="2026-03-15T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="flujo-lectura-normalizacion" name="Flujo pys_lectura_normalizacion">
+    <mxGraphModel dx="2200" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3200" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="s1" value="Subproceso 1: Inicio y resolución de entradas" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="20" y="40" width="330" height="1120" as="geometry"/></mxCell>
+        <mxCell id="s2" value="Subproceso 2: Passthrough upstream y READER_OPTIONS" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="370" y="40" width="330" height="1120" as="geometry"/></mxCell>
+        <mxCell id="s3" value="Subproceso 3: Contrato de entrada" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="720" y="40" width="330" height="1120" as="geometry"/></mxCell>
+        <mxCell id="s4" value="Subproceso 4: Preparación y helpers" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="1070" y="40" width="330" height="1120" as="geometry"/></mxCell>
+        <mxCell id="s5" value="Subproceso 5: Acumuladores y heredados" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="1420" y="40" width="330" height="1120" as="geometry"/></mxCell>
+        <mxCell id="s6" value="Subproceso 6: Lectura dinámica" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="1770" y="40" width="330" height="1120" as="geometry"/></mxCell>
+        <mxCell id="s7" value="Subproceso 7: Consolidación final" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="2120" y="40" width="330" height="1120" as="geometry"/></mxCell>
+        <mxCell id="s8" value="Subproceso 8: Limpieza y salida" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" vertex="1" parent="1"><mxGeometry x="2470" y="40" width="330" height="1120" as="geometry"/></mxCell>
+
+        <mxCell id="n1" value="Inicio pyspark_transform" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="s1"><mxGeometry x="90" y="60" width="150" height="45" as="geometry"/></mxCell>
+        <mxCell id="n2" value="Inicializar logs y helpers base" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s1"><mxGeometry x="65" y="130" width="200" height="60" as="geometry"/></mxCell>
+        <mxCell id="n3" value="Resolver input_df y param_read_row" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s1"><mxGeometry x="55" y="220" width="220" height="60" as="geometry"/></mxCell>
+        <mxCell id="n4" value="Extraer BUCKET_BLOB" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s1"><mxGeometry x="85" y="310" width="160" height="55" as="geometry"/></mxCell>
+        <mxCell id="n5" value="Log inicio" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s1"><mxGeometry x="105" y="390" width="120" height="50" as="geometry"/></mxCell>
+        <mxCell id="A" value="A" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s1"><mxGeometry x="130" y="470" width="50" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="a1" value="A" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s2"><mxGeometry x="140" y="60" width="50" height="50" as="geometry"/></mxCell>
+        <mxCell id="d1" value="¿Contrato estándar en input_df?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="90" y="140" width="150" height="90" as="geometry"/></mxCell>
+        <mxCell id="d2" value="¿estado=FALLIDO?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="105" y="260" width="120" height="80" as="geometry"/></mxCell>
+        <mxCell id="n6" value="Retornar contrato FALLIDO" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="80" y="370" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="z1" value="FIN" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="125" y="450" width="80" height="40" as="geometry"/></mxCell>
+        <mxCell id="n7" value="Leer READER_OPTIONS" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="90" y="540" width="150" height="55" as="geometry"/></mxCell>
+        <mxCell id="d3" value="¿READER_OPTIONS válido?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="95" y="620" width="140" height="90" as="geometry"/></mxCell>
+        <mxCell id="n8" value="Retornar error de parámetro" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="75" y="740" width="180" height="55" as="geometry"/></mxCell>
+        <mxCell id="z2" value="FIN" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="s2"><mxGeometry x="125" y="820" width="80" height="40" as="geometry"/></mxCell>
+        <mxCell id="B" value="B" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s2"><mxGeometry x="140" y="930" width="50" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="b1" value="B" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s3"><mxGeometry x="140" y="60" width="50" height="50" as="geometry"/></mxCell>
+        <mxCell id="d4" value="¿input_df válido?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="105" y="140" width="120" height="80" as="geometry"/></mxCell>
+        <mxCell id="n9" value="Retornar error sin DataFrame" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="75" y="250" width="180" height="55" as="geometry"/></mxCell>
+        <mxCell id="z3" value="FIN" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="125" y="330" width="80" height="40" as="geometry"/></mxCell>
+        <mxCell id="d5" value="¿Tiene columna path?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="95" y="410" width="140" height="90" as="geometry"/></mxCell>
+        <mxCell id="n10" value="files_df desde path + log" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="80" y="530" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="d6" value="¿Contrato estándar?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="100" y="620" width="130" height="90" as="geometry"/></mxCell>
+        <mxCell id="d7" value="¿Parámetros bucket/path válidos?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="90" y="740" width="150" height="95" as="geometry"/></mxCell>
+        <mxCell id="n11" value="binaryFile + files_df + log" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s3"><mxGeometry x="80" y="865" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="C" value="C" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s3"><mxGeometry x="140" y="950" width="50" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="c1" value="C" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s4"><mxGeometry x="140" y="60" width="50" height="50" as="geometry"/></mxCell>
+        <mxCell id="n12" value="Collect distinct de files_df" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s4"><mxGeometry x="80" y="140" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="n13" value="Separar files e inherited_errors" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s4"><mxGeometry x="80" y="220" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="n14" value="Definir helpers de compresión/extensión" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s4"><mxGeometry x="70" y="300" width="190" height="60" as="geometry"/></mxCell>
+        <mxCell id="n15" value="Definir helpers ZIP/staging/dataset" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s4"><mxGeometry x="70" y="390" width="190" height="60" as="geometry"/></mxCell>
+        <mxCell id="n16" value="Definir read_dynamic y cast_all_to_string" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s4"><mxGeometry x="60" y="480" width="210" height="60" as="geometry"/></mxCell>
+        <mxCell id="D" value="D" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s4"><mxGeometry x="140" y="570" width="50" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="d1s5" value="D" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s5"><mxGeometry x="140" y="60" width="50" height="50" as="geometry"/></mxCell>
+        <mxCell id="n17" value="Inicializar datasets y error_records" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s5"><mxGeometry x="70" y="140" width="190" height="60" as="geometry"/></mxCell>
+        <mxCell id="n18" value="Recorrer inherited_errors" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s5"><mxGeometry x="85" y="230" width="160" height="55" as="geometry"/></mxCell>
+        <mxCell id="n19" value="Agregar ERROR_UPSTREAM" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s5"><mxGeometry x="95" y="315" width="140" height="55" as="geometry"/></mxCell>
+        <mxCell id="E" value="E" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s5"><mxGeometry x="140" y="400" width="50" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="e1" value="E" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s6"><mxGeometry x="140" y="60" width="50" height="50" as="geometry"/></mxCell>
+        <mxCell id="n20" value="Loop files" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="110" y="140" width="110" height="50" as="geometry"/></mxCell>
+        <mxCell id="d8" value="¿expand_input_paths OK?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="95" y="220" width="140" height="90" as="geometry"/></mxCell>
+        <mxCell id="n21" value="Registrar ERROR_LECTURA" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="80" y="340" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="n22" value="Loop targets" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="110" y="425" width="110" height="50" as="geometry"/></mxCell>
+        <mxCell id="d9" value="¿read_dynamic OK?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="100" y="505" width="130" height="85" as="geometry"/></mxCell>
+        <mxCell id="n23" value="Registrar ERROR_LECTURA" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="80" y="620" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="n24" value="Enriquecer columnas técnicas" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="80" y="705" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="n25" value="cast_all_to_string" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="100" y="790" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="n26" value="unionByName por dataset" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s6"><mxGeometry x="90" y="870" width="150" height="55" as="geometry"/></mxCell>
+        <mxCell id="F" value="F" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s6"><mxGeometry x="140" y="950" width="50" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="f1" value="F" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s7"><mxGeometry x="140" y="60" width="50" height="50" as="geometry"/></mxCell>
+        <mxCell id="d10" value="¿datasets y errores vacíos?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="85" y="140" width="160" height="95" as="geometry"/></mxCell>
+        <mxCell id="n27" value="Retornar DF vacío con esquema base" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="70" y="270" width="190" height="60" as="geometry"/></mxCell>
+        <mxCell id="z4" value="FIN" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="125" y="355" width="80" height="40" as="geometry"/></mxCell>
+        <mxCell id="n28" value="Unir datasets en final_df" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="85" y="430" width="170" height="55" as="geometry"/></mxCell>
+        <mxCell id="d11" value="¿Hay error_records?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="100" y="515" width="140" height="85" as="geometry"/></mxCell>
+        <mxCell id="n29" value="Crear error_df y unir" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="90" y="630" width="160" height="55" as="geometry"/></mxCell>
+        <mxCell id="d12" value="¿final_df es None?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="105" y="715" width="130" height="85" as="geometry"/></mxCell>
+        <mxCell id="n30" value="Retornar error final_df" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="90" y="830" width="160" height="55" as="geometry"/></mxCell>
+        <mxCell id="z5" value="FIN" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="s7"><mxGeometry x="125" y="910" width="80" height="40" as="geometry"/></mxCell>
+        <mxCell id="G" value="G" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s7"><mxGeometry x="140" y="990" width="50" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="g1" value="G" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="s8"><mxGeometry x="140" y="60" width="50" height="50" as="geometry"/></mxCell>
+        <mxCell id="n31" value="Eliminar columnas de contrato estándar" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s8"><mxGeometry x="65" y="140" width="200" height="60" as="geometry"/></mxCell>
+        <mxCell id="d13" value="¿error_records vacío?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="s8"><mxGeometry x="100" y="230" width="130" height="85" as="geometry"/></mxCell>
+        <mxCell id="n32" value="Generar columnas fecha_ingesta y nombre_archivo" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s8"><mxGeometry x="60" y="345" width="210" height="60" as="geometry"/></mxCell>
+        <mxCell id="n33" value="Log finalización" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s8"><mxGeometry x="100" y="435" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="n34" value="Retornar final_df" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="s8"><mxGeometry x="95" y="515" width="140" height="50" as="geometry"/></mxCell>
+        <mxCell id="z6" value="FIN" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="s8"><mxGeometry x="125" y="595" width="80" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="e01" edge="1" parent="1" source="n1" target="n2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e02" edge="1" parent="1" source="n2" target="n3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e03" edge="1" parent="1" source="n3" target="n4" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e04" edge="1" parent="1" source="n4" target="n5" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e05" edge="1" parent="1" source="n5" target="A" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e06" edge="1" parent="1" source="A" target="a1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e07" edge="1" parent="1" source="a1" target="d1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e08" value="Sí" edge="1" parent="1" source="d1" target="d2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e09" value="Sí" edge="1" parent="1" source="d2" target="n6" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="n6" target="z1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="No" edge="1" parent="1" source="d2" target="n7" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" value="No" edge="1" parent="1" source="d1" target="n7" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="n7" target="d3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" value="No" edge="1" parent="1" source="d3" target="n8" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="n8" target="z2" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e16" value="Sí" edge="1" parent="1" source="d3" target="B" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e17" edge="1" parent="1" source="B" target="b1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e18" edge="1" parent="1" source="b1" target="d4" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e19" value="No" edge="1" parent="1" source="d4" target="n9" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e20" edge="1" parent="1" source="n9" target="z3" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e21" value="Sí" edge="1" parent="1" source="d4" target="d5" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e22" value="Sí" edge="1" parent="1" source="d5" target="n10" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e23" edge="1" parent="1" source="n10" target="C" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e24" value="No" edge="1" parent="1" source="d5" target="d6" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e25" value="Sí" edge="1" parent="1" source="d6" target="d7" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e26" value="Sí" edge="1" parent="1" source="d7" target="n11" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e27" edge="1" parent="1" source="n11" target="C" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e28" edge="1" parent="1" source="C" target="c1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e29" edge="1" parent="1" source="c1" target="n12" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e30" edge="1" parent="1" source="n12" target="n13" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e31" edge="1" parent="1" source="n13" target="n14" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e32" edge="1" parent="1" source="n14" target="n15" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e33" edge="1" parent="1" source="n15" target="n16" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e34" edge="1" parent="1" source="n16" target="D" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e35" edge="1" parent="1" source="D" target="d1s5" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e36" edge="1" parent="1" source="d1s5" target="n17" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e37" edge="1" parent="1" source="n17" target="n18" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e38" edge="1" parent="1" source="n18" target="n19" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e39" edge="1" parent="1" source="n19" target="E" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e40" edge="1" parent="1" source="E" target="e1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e41" edge="1" parent="1" source="e1" target="n20" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e42" edge="1" parent="1" source="n20" target="d8" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e43" value="No" edge="1" parent="1" source="d8" target="n21" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e44" edge="1" parent="1" source="n21" target="n20" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e45" value="Sí" edge="1" parent="1" source="d8" target="n22" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e46" edge="1" parent="1" source="n22" target="d9" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e47" value="No" edge="1" parent="1" source="d9" target="n23" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e48" edge="1" parent="1" source="n23" target="n22" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e49" value="Sí" edge="1" parent="1" source="d9" target="n24" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e50" edge="1" parent="1" source="n24" target="n25" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e51" edge="1" parent="1" source="n25" target="n26" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e52" edge="1" parent="1" source="n26" target="n22" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e53" edge="1" parent="1" source="n20" target="F" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e54" edge="1" parent="1" source="F" target="f1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e55" edge="1" parent="1" source="f1" target="d10" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e56" value="Sí" edge="1" parent="1" source="d10" target="n27" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e57" edge="1" parent="1" source="n27" target="z4" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e58" value="No" edge="1" parent="1" source="d10" target="n28" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e59" edge="1" parent="1" source="n28" target="d11" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e60" value="Sí" edge="1" parent="1" source="d11" target="n29" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e61" edge="1" parent="1" source="n29" target="d12" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e62" value="No" edge="1" parent="1" source="d11" target="d12" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e63" value="Sí" edge="1" parent="1" source="d12" target="n30" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e64" edge="1" parent="1" source="n30" target="z5" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e65" value="No" edge="1" parent="1" source="d12" target="G" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e66" edge="1" parent="1" source="G" target="g1" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e67" edge="1" parent="1" source="g1" target="n31" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e68" edge="1" parent="1" source="n31" target="d13" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e69" value="Sí" edge="1" parent="1" source="d13" target="n32" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e70" edge="1" parent="1" source="n32" target="n33" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e71" edge="1" parent="1" source="n33" target="n34" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e72" edge="1" parent="1" source="n34" target="z6" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e73" value="No" edge="1" parent="1" source="d13" target="n33" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
